@@ -1,5 +1,6 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import numpy as np
 
 def observe_confident_distribution(param_path):
     param = pd.read_csv(param_path)
@@ -18,12 +19,14 @@ def accurate_VS_size(param_path, correct_pick):
     param = pd.read_csv(param_path)
     r = []
     num = []
-    confidence_thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-    for c in confidence_thresholds:
+    confidence_thresholds = []
+    for c in np.arange(0, 1.0, 0.025):
         subset = param[param['Confident Level'] > c]
-        wrong = subset[subset['Outlier'] != correct_pick]
-        r.append(1-len(wrong)/len(subset))
-        num.append(len(subset))
+        if len(subset) > 0:
+            wrong = subset[subset['Outlier'] != correct_pick]
+            r.append(1 - len(wrong) / len(subset))
+            num.append(len(subset))
+            confidence_thresholds.append(c)
 
     fig, ax1 = plt.subplots()
     ax2 = ax1.twinx()
@@ -49,7 +52,6 @@ if __name__ == '__main__':
     #path = "H:/jagadish_data/5 base/position 7/GAP-seq_5ntseq_position7_dex10%formamide2_gapseq_PELT_detection_result.csv"
     path = "H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq_PELT_detection_result.csv"
     observe_confident_distribution(path)
-    accurate_VS_size(path,
-    correct_pick='G')
+    accurate_VS_size(path, correct_pick='G')
 
 

@@ -6,10 +6,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import butter, lfilter
 from sklearn.cluster import KMeans
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 import re
 
 
-def outlier_detect(binding_params, ref_intensity_change):
+
+def outlier_detect(binding_params):
     """
     Detects the least active outlier time series and calculates confidence.
 
@@ -23,7 +25,8 @@ def outlier_detect(binding_params, ref_intensity_change):
     - confidence: Confidence score (0-1), scaled by activity magnitude.
     """
     # Define user-set thresholds dynamically
-    user_thresholds = np.array([100, 5, ref_intensity_change])
+    # [total_binding_duration, binding_event_nums, avg_binding_intensity]
+    user_thresholds = np.array([100, 5, 500])
 
     if not np.any(binding_params):
         return 4, 0
@@ -41,14 +44,14 @@ def outlier_detect(binding_params, ref_intensity_change):
     scores = np.dot(normalized_params, weights)
 
     indices = np.argsort(scores)  # Sort indices by scores
-    outlier_index = indices[-1]   # Identify the least active outlier (lowest score)
+    outlier_index = indices[-1]  # Identify the least active outlier (lowest score)
 
     # Calculate average score of the remaining traces
     average_other_score = scores[indices[:-1]].mean()
 
     # Confidence level calculation
-    #if (1 - average_other_score) != 0:
-    confident = (scores[outlier_index] - average_other_score) / (1 - average_other_score)
+    # if (1 - average_other_score) != 0:
+    confidence = (scores[outlier_index] - average_other_score) / (1 - average_other_score)
     # else:
     #     confident = 0
 
@@ -60,35 +63,53 @@ def outlier_detect(binding_params, ref_intensity_change):
         activity_magnitude = 1
     else:
         activity_magnitude = np.clip((second_least_active / user_thresholds), 0, 1).mean()
+    # most_active_params = binding_params[indices[0], :]
+    # activity_magnitude = np.clip((most_active_params / user_thresholds), 0, 1).mean()
 
     # Adjust confidence with activity magnitude
-    confident *= activity_magnitude
-
-    return outlier_index, confident
+    confidence *= activity_magnitude
 
 
-def PELT_trace_fitting(id, original_signal, segment_points, display=False):
-    mini_size = 5
-    # signal = savgol_filter(original_signal, 11, 5)
-    # b, a = butter(3, 0.1, btype='low')
-    # signal = lfilter(b, a, signal)
-    # signal = np.convolve(signal, np.ones(10) / 10, mode='same')
+    return outlier_index, confidence
 
-    # subtract the baseline for each trace
-    signal = []
-    for i in np.arange(len(segment_points) - 1):
-        sub_signal = original_signal[segment_points[i]:segment_points[i + 1]]
-        sub_signal = savgol_filter(sub_signal, 11, 5)
-        b, a = butter(3, 0.1, btype='low')
-        sub_signal = lfilter(b, a, sub_signal)
-        sub_signal = np.convolve(sub_signal, np.ones(10) / 10, mode='same')
-        print(np.percentile(sub_signal, 15))
-        sub_signal = sub_signal - np.percentile(sub_signal, 10)
-        signal.append(sub_signal)
-        #signal[segment_points[i]:segment_points[i + 1]] = (signal[segment_points[i]:segment_points[i + 1]] -
-                                          #np.percentile(signal[segment_points[i]:segment_points[i + 1]], 10))
-    #signal = np.where(signal > 0, signal, 0)
-    signal = np.concatenate(signal, axis=0)
+def merge_stage(stage_params, segment_points, signal):
+    # Recalculate segment membership based on updated segment points
+    stage_params['segment'] = pd.cut(
+        stage_params['start'],
+        bins=segment_points,
+        labels=False,
+        right=False
+    )
+
+    stage_params['group'] = (
+            (stage_params['k_label'] != stage_params['k_label'].shift()) |
+            (stage_params['segment'] != stage_params['segment'].shift())
+    ).cumsum()
+
+    # Perform the aggregation to merge stages
+    stage_params = stage_params.groupby('group').agg({
+        'intensity': 'mean',
+        'start': 'min',
+        'end': 'max',
+        'k_label': 'first'
+    }).reset_index(drop=True)
+
+    # Ensure the DataFrame is sorted by 'start' time
+    stage_params.sort_values(by='start', inplace=True)
+
+    # Recalculate the real mean intensity using the original signal
+    stage_params['intensity'] = stage_params.apply(
+        lambda row: signal[int(row['start']):int(row['end'])].mean(), axis=1)
+
+    return stage_params
+
+
+def get_stage_params(original_signal, segment_points, mini_size=5):
+    # Smooth the signal using Savitzky-Golay filter and low-pass Butterworth filter
+    signal = savgol_filter(original_signal, 11, 5)
+    b, a = butter(3, 0.1, btype='low')
+    signal = lfilter(b, a, signal)
+    signal = np.convolve(signal, np.ones(10) / 10, mode='same')
 
     # Detect change points using the PELT algorithm with linear kernel
     algo = rpt.KernelCPD(kernel='linear', min_size=mini_size).fit(signal)
@@ -115,61 +136,63 @@ def PELT_trace_fitting(id, original_signal, segment_points, display=False):
     ends = bkps[1:]
     # Calculate mean intensities for each segment
     intensities = [np.mean(signal[start:end]) for start, end in zip(starts, ends)]
+
     # Combine results into the desired format
     stage_params = np.column_stack([intensities, starts, ends, range(len(starts))])
 
-    # threshold = 1.25 * np.std(signal)
-    # k_label = np.clip((stage_params[:, 0] // threshold), 0, 2)
-    kmeans = KMeans(n_clusters=3).fit(stage_params[:, 0].reshape(-1, 1))
+    # get the minimum intensity of one stage from each segmentation and update the
+    # intensity column and signal accordingly
+    for i in np.arange(len(segment_points) - 1):
+        max_frame = segment_points[i + 1]
+        min_frame = segment_points[i]
+
+        mask = (stage_params[:, 2] > min_frame) & (stage_params[:, 1] < max_frame)
+        subset = stage_params[mask].copy()
+
+        # if the duration of the stage is less than 2% of the segment, then ignore it
+        # 2% is an arbitrary number, can be changed
+        duration_mask = (subset[:, 2] - subset[:, 1]) > (max_frame - min_frame) / 50
+        minimum_intensity = subset[duration_mask, 0].min()
+
+        stage_params[mask, 0] -= minimum_intensity
+        signal[min_frame: max_frame] = signal[min_frame: max_frame] - minimum_intensity
+
+    return stage_params, signal
+
+
+def PELT_trace_fitting(id, original_signal, segment_points, display=False):
+
+    stage_params, signal = get_stage_params(original_signal, segment_points)
+
+    kmeans = KMeans(n_clusters=4).fit(stage_params[:, 0].reshape(-1, 1))
+    # Map the labels to the original labels so that the smallest intensity is 0
+    # and the largest intensity is 2, and the middle intensity is 1
     # Sort centroids and create a mapping
     centroids = kmeans.cluster_centers_.flatten()
     sorted_indices = np.argsort(centroids)  # Indices of centroids from smallest to largest
-    label_mapping = {sorted_indices[i]: i for i in range(3)}
+    label_mapping = {sorted_indices[i]: i for i in range(4)}
     k_label = np.array([label_mapping[label] for label in kmeans.labels_])
 
     stage_params = np.hstack((stage_params, k_label.reshape(-1, 1)))
     stage_params = pd.DataFrame(stage_params, columns=['intensity', 'start', 'end', 'stage', 'k_label'])
     stage_params['k_label'] = stage_params['k_label'].astype(int)
 
-    # Recalculate segment membership based on updated segment points
-    stage_params['segment'] = pd.cut(
-        stage_params['start'],
-        bins=segment_points,
-        labels=False,
-        right=False
-    )
+    stage_params = merge_stage(stage_params, segment_points, signal)
 
-    # Perform merging within each segment separately
-    # Merge stages: Create a group based on both binding and merge condition
-    stage_params['group'] = (
-            (stage_params['k_label'] != stage_params['k_label'].shift()) |
-            (stage_params['segment'] != stage_params['segment'].shift())
-    ).cumsum()
+    # adjust k-labels within each segment
+    for i in np.arange(len(segment_points) - 1):
+        max_frame = segment_points[i + 1]
+        min_frame = segment_points[i]
+        mask = (stage_params['end'] > min_frame) & (stage_params['start'] < max_frame)
 
-    # Perform the aggregation to merge stages
-    stage_params = stage_params.groupby('group').agg({
-        'intensity': 'mean',
-        'start': 'min',
-        'end': 'max',
-        'k_label': 'first'
-    }).reset_index(drop=True)
+        if np.sum(mask) == 0:
+            continue
 
-    # # Update the 'stage' column
-    # stage_params['stage'] = np.arange(len(stage_params))
+        while stage_params.loc[mask, 'k_label'].min() > 0:
+            stage_params.loc[mask, 'k_label'] = stage_params.loc[mask, 'k_label'].replace({1: 0, 2: 1, 3: 2})
 
-    # Ensure the DataFrame is sorted by 'start' time
-    stage_params.sort_values(by='start', inplace=True)
 
-    # Recalculate the real mean intensity using the original signal
-    stage_params['intensity'] = stage_params.apply(
-        lambda row: signal[int(row['start']):int(row['end'])].mean(), axis=1)
-
-    # Update the 'stage' column
-    stage_params['stage'] = np.arange(len(stage_params))
-
-    # # Ensure the DataFrame is sorted by 'start' time
-    # stage_params.sort_values(by='start', inplace=True)
-
+    # Calculate binding parameters for each segment
     binding_params = []
     for i in np.arange(len(segment_points) - 1):
         max_frame = segment_points[i + 1]
@@ -177,7 +200,7 @@ def PELT_trace_fitting(id, original_signal, segment_points, display=False):
         #subset = stage_params[(stage_params['start'] >= min_frame) & (stage_params['end'] < max_frame)]
         subset = stage_params[(stage_params['end'] > min_frame) & (stage_params['start'] < max_frame)]
 
-        binding_subset = subset[subset['k_label'] >= 1]
+        binding_subset = subset[subset['k_label'] > 0]
         unbinding_subset = subset[subset['k_label'] == 0]
 
         if len(binding_subset) == 0:
@@ -186,26 +209,24 @@ def PELT_trace_fitting(id, original_signal, segment_points, display=False):
 
         total_binding_duration = (binding_subset['end'] - binding_subset['start']).sum()
         binding_event_num = len(binding_subset)
-        binding_intensity_mean = binding_subset['intensity'].mean()
 
-        if len(unbinding_subset) == 0:
-            binding_params.append([total_binding_duration, binding_event_num, binding_intensity_mean])
-            continue
+        avg_binding_intensity = (np.average(binding_subset['intensity'], weights=(binding_subset['end'] - binding_subset['start'])) -
+                                 np.average(unbinding_subset['intensity'], weights=(unbinding_subset['end'] - unbinding_subset['start'])))
 
-        unbinding_intensity_mean = unbinding_subset['intensity'].mean()
-        avg_binding_intensity = binding_intensity_mean - unbinding_intensity_mean
         binding_params.append([total_binding_duration, binding_event_num, avg_binding_intensity])
 
-    ref_int = np.std(signal)
-    outlier, confident = outlier_detect(binding_params, ref_int)
+    # detect outliers
+    #ref_int = np.std(signal)
+    outlier, confident = outlier_detect(binding_params)
 
+    # Display the results
     if display:
         plt.plot(np.arange(len(original_signal)), original_signal, label='Original Signal')
-        plt.plot(np.arange(len(signal)), signal, label='Smoothed Signal')
+        plt.plot(np.arange(len(signal)), signal, label='Corrected Signal')
 
-        plt.hlines(xmin=0, xmax=len(signal), y=ref_int, color='black', linestyle='--', label='Threshold')
+        #plt.hlines(xmin=0, xmax=len(signal), y=ref_int, color='black', linestyle='--', label='Threshold')
 
-        colors = ['green', 'yellow', 'red']
+        colors = ['green', 'skyblue', 'yellow', 'red']
         pre_intensity = 0
         for i in np.arange(len(stage_params)):
             current_intensity = stage_params['intensity'].iloc[i]
@@ -221,7 +242,7 @@ def PELT_trace_fitting(id, original_signal, segment_points, display=False):
         plt.legend()
         plt.xlabel('Frame')
         plt.ylabel('Intensity')
-        plt.title(id)
+        plt.title('ID :{}, confidence: {}'.format(id, np.round(confident, 2)))
         plt.show()
 
     return id, outlier, confident
@@ -265,7 +286,8 @@ def Gapseq_data_analysis(read_path, pattern=r'', display=False, save=True, id_li
     for id in id_list:
         trace_set = []
         for trace in [A_traces[id], T_traces[id], C_traces[id], G_traces[id]]:
-            trace = trace - np.percentile(trace, 15)
+            #trace = get_stage_params(trace, signal_correction=True)
+            #trace = trace - np.median(trace)#np.percentile(trace, 15)
             trace_set.append(trace)
         signal = np.concatenate(trace_set, axis=0)
         process_params.append((id, signal, segment_points, display))
@@ -300,8 +322,7 @@ def Gapseq_data_analysis(read_path, pattern=r'', display=False, save=True, id_li
 
 
 if __name__ == '__main__':
-    #path = "H:/jagadish_data/5 base/position 7/GAP-seq_5ntseq_position7_dex10%formamide2_gapseq.csv"
-    path = "H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq.csv"
-    Gapseq_data_analysis(path,
-                   pattern=r'_s7([A-Z])_', display=True, save=True)
+    path = "H:/jagadish_data/5 base/position 7/GAP-seq_5ntseq_position7_dex10%formamide2_gapseq.csv"
+    #path = "H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq.csv"
+    Gapseq_data_analysis(path, pattern=r'_seal7([A-Z])4uM_', display=False, save=True)
 
