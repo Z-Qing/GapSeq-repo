@@ -150,7 +150,7 @@ def baseline_correction(stage_params, smoothed_signal, movie_length, thresholds,
             same_k_stage = subset[subset['k_label'] == k]
             total_duration = (same_k_stage['end'] - same_k_stage['start']).sum()
             # if the total duration of a certain k_label is too small it can be noise
-            if total_duration > movie_length // 20:
+            if total_duration > movie_length // 10:
                 baseline = np.median(same_k_stage['intensity'])
                 break
 
