@@ -12,7 +12,9 @@ import re
 
 def outlier_detect(original_binding_params, user_thresholds):
     # 1. Basic sanity checks
-    if not np.any(original_binding_params[:, :3]):  # no binding event found in all 4 traces
+    # if not np.any(original_binding_params[:, :2]):  # no binding event found in all 4 traces
+    #     return 4, 0
+    if np.sum(original_binding_params == 0) >= 6:
         return 4, 0
 
     binding_params = original_binding_params
@@ -28,7 +30,7 @@ def outlier_detect(original_binding_params, user_thresholds):
     scores = binding_params / total_activity
     scores = np.sum(scores, axis=1)
 
-    temperature = 0.75
+    temperature = 0.25
     exp_scores = np.exp(scores / temperature)
 
     softmax = exp_scores / np.sum(exp_scores)
@@ -37,12 +39,12 @@ def outlier_detect(original_binding_params, user_thresholds):
     most_active_index = np.argmin(softmax)
 
 
-    ratio = np.clip(original_binding_params[most_active_index][:3] / user_thresholds, 0, 1)
+    ratio = np.clip(original_binding_params[most_active_index] / user_thresholds, 0, 1)
     #mag = ratio.mean()
     #mag = 1.0 - np.prod(1.0 - ratio)
     p = 3
     mag = ((ratio ** p).mean()) ** (1 / p)
-
+    #
     # print(mag)
     # print(softmax)
 
@@ -53,7 +55,7 @@ def outlier_detect(original_binding_params, user_thresholds):
 
 
 
-def change_point_analysis(original_signal, mini_size=30):
+def change_point_analysis(original_signal, mini_size=5):
     # Smooth the signal using Savitzky-Golay filter and low-pass Butterworth filter
     signal = savgol_filter(original_signal, 11, 5)
     b, a = butter(3, 0.2, btype='low')
@@ -123,7 +125,7 @@ def merge_stage(stage_params, signal):
 
 
 
-def baseline_correction(stage_params, smoothed_signal, movie_length,
+def baseline_correction(stage_params, smoothed_signal, movie_length, thresholds,
                         nucleotide_sequence):
     # ---------------------- Merge stages ----------------------
     #k_label = intensity_classification_kmeans(stage_params['intensity'].to_numpy().reshape(-1, 1))
@@ -148,7 +150,7 @@ def baseline_correction(stage_params, smoothed_signal, movie_length,
             same_k_stage = subset[subset['k_label'] == k]
             total_duration = (same_k_stage['end'] - same_k_stage['start']).sum()
             # if the total duration of a certain k_label is too small it can be noise
-            if total_duration > movie_length // 10:
+            if total_duration > movie_length // 20:
                 baseline = np.median(same_k_stage['intensity'])
                 break
 
@@ -160,17 +162,21 @@ def baseline_correction(stage_params, smoothed_signal, movie_length,
         end = movie_length * (i + 1)
         base_corrected_signal[start: end] = smoothed_signal[start: end] - baseline
 
-    # ---------------------- Merge stages Again ----------------------
+    # ---------------------- Assign stages into 2 classes on and off ----------------------
     # k-means clustering again after intensity correction and update k-labels
-    #new_k_label_k = intensity_classification_kmeans(stage_params['intensity'].to_numpy().reshape(-1, 1), num_class=4)
-    new_k_label_k = intensity_classification_Aggo(stage_params['intensity'].to_numpy().reshape(-1, 1), num_class=4)
-    #new_k_label_t = stage_params['intensity'].to_numpy() > threshold
-    new_k_label = (new_k_label_k >= 2).astype(int)
-    #new_k_label = np.all(np.vstack((new_k_label_t, new_k_label_k)), axis=0)
+    threshold_column = stage_params['nucleotide'].apply(lambda x: thresholds[nucleotide_sequence.index(x)])
+    new_k_label = (stage_params['intensity'] > threshold_column).astype(int)
     stage_params['k_label'] = new_k_label
 
+    # new_k_label_k = intensity_classification_Aggo(stage_params['intensity'].to_numpy().reshape(-1, 1), num_class=3)
+    # # new_k_label_t = stage_params['intensity'].to_numpy() > threshold
+    # new_k_label = new_k_label_k > 0
+    # stage_params['k_label'] = new_k_label.astype(int)
+    # new_k_label = np.all(np.vstack((new_k_label_t, new_k_label_k)), axis=0)
+    # stage_params['k_label'] = new_k_label.astype(int)
+
     # merge again
-    stage_params = merge_stage(stage_params, base_corrected_signal)
+    #stage_params = merge_stage(stage_params, base_corrected_signal)
 
     # ---------------------- Correct k_label ----------------------
     # in case baseline correction or classification is wrong
@@ -192,8 +198,8 @@ def baseline_correction(stage_params, smoothed_signal, movie_length,
 def PELT_trace_fitting(id, original_signal_list, display=False):
     movie_length = len(original_signal_list[0])
     nucleotide_sequence = ['A', 'T', 'C', 'G']
-    intensity_std = [np.std(s) for s in original_signal_list]
-    intensity_threshold = 1.5 * max(intensity_std)
+    intensity_stds = [np.std(s) for s in original_signal_list]
+    #intensity_threshold = min(intensity_stds)
 
     # ------------- Change point analysis creating stage_params ----------------------
     stage_params = []
@@ -214,11 +220,11 @@ def PELT_trace_fitting(id, original_signal_list, display=False):
     signal = np.concatenate(signal, axis=0)
 
     # baseline correction and stage merging
-    stage_params, signal = baseline_correction(stage_params, signal, movie_length, nucleotide_sequence)
+    stage_params, signal = baseline_correction(stage_params, signal, movie_length, intensity_stds, nucleotide_sequence)
 
 
     # -------------Calculate binding parameters for each nucleotide --------------
-    binding_params = pd.DataFrame(np.zeros((4, 4)), columns=['total_duration', 'event_num', 'binding_intensity', 'std_intensity'],
+    binding_params = pd.DataFrame(np.zeros((4, 3)), columns=['total_duration', 'event_num', 'binding_intensity'],
                                   index=nucleotide_sequence)
     for i in np.arange(4):
         n = nucleotide_sequence[i]
@@ -228,7 +234,7 @@ def PELT_trace_fitting(id, original_signal_list, display=False):
         unbinding_subset = subset[subset['k_label'] == 0]
 
         if len(binding_subset) == 0:
-            binding_params.loc[n] = [0, 0, 0, intensity_std[i]]
+            binding_params.loc[n] = [0, 0, 0]
             continue
 
         total_binding_duration = (binding_subset['end'] - binding_subset['start']).sum()
@@ -237,10 +243,10 @@ def PELT_trace_fitting(id, original_signal_list, display=False):
         avg_binding_intensity = (np.average(binding_subset['intensity'], weights=(binding_subset['end'] - binding_subset['start'])) -
                                  np.average(unbinding_subset['intensity'], weights=(unbinding_subset['end'] - unbinding_subset['start'])))
 
-        binding_params.loc[n] = [total_binding_duration, binding_event_num, avg_binding_intensity, intensity_std[i]]
+        binding_params.loc[n] = [total_binding_duration, binding_event_num, avg_binding_intensity]
 
     # detect outliers
-    outlier, confident = outlier_detect(binding_params.to_numpy(), np.array([500, 3, max(intensity_threshold, 500)]))
+    outlier, confident = outlier_detect(binding_params.to_numpy(), np.array([500, 10, max(intensity_stds)]))
 
     # Display the results
     if display:
@@ -340,13 +346,15 @@ def Gapseq_data_analysis(read_path, pattern=r'', display=False, save=True, id_li
 
 
 if __name__ == '__main__':
-    #path = "H:/jagadish_data/5 base/position 7/GAP-seq_5ntseq_position7_dex10%formamide2_gapseq.csv"
+    # #path = "H:/jagadish_data/5 base/position 7/GAP-seq_5ntseq_position7_dex10%formamide2_gapseq.csv"
     path = "H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq.csv"
-    Gapseq_data_analysis(path, pattern=r'_s7([A-Z])_', display=False, save=True)
+    # #path = "H:/jagadish_data/5 base/position 9/5nt_13GAP_pos9_dex15%__form20%_seqeucing_degen2uM_seal9A4uM_gapseq.csv"
+    Gapseq_data_analysis(path, pattern=r'_s7([A-Z])_.', display=False, save=True)
 
 
-    # param = pd.read_csv("H:/jagadish_data/5 base/position 7/GAP-seq_5ntseq_position7_dex10%formamide2_gapseq_PELT_detection_result.csv")
-    # param = param[param['Confident Level'] > 0.7]
+    #param = pd.read_csv("H:/jagadish_data/5 base/position 7/GAP-seq_5ntseq_position7_dex10%formamide2_gapseq_PELT_detection_result.csv")
+    # param = pd.read_csv("H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq_PELT_detection_result.csv")
+    # param = param[param['Confident Level'] > 0.5]
     # ids = param['ID'].astype(str).to_list()
-    # Gapseq_data_analysis("H:/jagadish_data/5 base/position 7/GAP-seq_5ntseq_position7_dex10%formamide2_gapseq.csv",
-    #                      pattern=r'_seal7([A-Z])4uM_', display=True, save=True, id_list=ids)
+    # Gapseq_data_analysis("H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq.csv",
+    #                      pattern=r'_s7([A-Z])_', display=True, save=True, id_list=ids)

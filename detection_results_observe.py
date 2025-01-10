@@ -4,6 +4,7 @@ import numpy as np
 
 def observe_confident_distribution(param_path):
     param = pd.read_csv(param_path)
+    param = param[param['Outlier'] != 'No signal']
 
     for nucleotide in param['Outlier'].unique():
         subset = param[param['Outlier'] == nucleotide]
@@ -51,7 +52,8 @@ def accurate_VS_size(param_path, correct_pick):
 if __name__ == '__main__':
     #path = "H:/jagadish_data/5 base/position 7/GAP-seq_5ntseq_position7_dex10%formamide2_gapseq_PELT_detection_result.csv"
     path = "H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq_PELT_detection_result.csv"
+    #path = "H:/jagadish_data/3 base/base recognition/position 6/GAP13nt_position6_comp1uM_degen1uM_buffer20%formamide_GAP13nt_L532L638_Seal6A_degen1uM_gapseq_PELT_detection_result.csv"
+    #path = "H:/jagadish_data/5 base/position 9/5nt_13GAP_pos9_dex15%__form20%_seqeucing_degen2uM_seal9A4uM_gapseq_PELT_detection_result.csv"
     observe_confident_distribution(path)
     accurate_VS_size(path, correct_pick='G')
-
 
