@@ -5,32 +5,23 @@ import ruptures as rpt
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import butter, lfilter
-from sklearn.cluster import KMeans, AgglomerativeClustering
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.cluster import AgglomerativeClustering
 import re
 
 
 def outlier_detect(original_binding_params, user_thresholds):
     # 1. Basic sanity checks
-    # if not np.any(original_binding_params[:, :2]):  # no binding event found in all 4 traces
-    #     return 4, 0
     if np.sum(original_binding_params == 0) >= 6:
         return 4, 0
 
-    binding_params = original_binding_params
-    max_features = np.max(binding_params, axis=0)
-    binding_params = max_features - binding_params
-    #binding_params = binding_params / max_features
-    binding_params = MinMaxScaler().fit_transform(binding_params)
 
+    binding_params = original_binding_params.copy()
     total_activity = np.sum(binding_params, axis=0)
-    if np.any(total_activity == 0):  # probably event numbers and durations are all zero
-        return 4, 0
 
-    scores = binding_params / total_activity
+    scores = (total_activity - binding_params) / total_activity
     scores = np.sum(scores, axis=1)
 
-    temperature = 0.25
+    temperature = 0.5
     exp_scores = np.exp(scores / temperature)
 
     softmax = exp_scores / np.sum(exp_scores)
@@ -42,7 +33,7 @@ def outlier_detect(original_binding_params, user_thresholds):
     ratio = np.clip(original_binding_params[most_active_index] / user_thresholds, 0, 1)
     #mag = ratio.mean()
     #mag = 1.0 - np.prod(1.0 - ratio)
-    p = 3
+    p = 0.25
     mag = ((ratio ** p).mean()) ** (1 / p)
     #
     # print(mag)
@@ -57,10 +48,10 @@ def outlier_detect(original_binding_params, user_thresholds):
 
 def change_point_analysis(original_signal, mini_size=5):
     # Smooth the signal using Savitzky-Golay filter and low-pass Butterworth filter
-    signal = savgol_filter(original_signal, 11, 5)
-    b, a = butter(3, 0.2, btype='low')
+    signal = savgol_filter(original_signal, 10, 5)
+    b, a = butter(3, 0.1, btype='low')
     signal = lfilter(b, a, signal)
-    signal = np.convolve(signal, np.ones(20) / 20, mode='same')
+    signal = np.convolve(signal, np.ones(5) / 5, mode='same')
 
     # Detect change points using the PELT algorithm with linear kernel
     algo = rpt.KernelCPD(kernel='linear', min_size=mini_size).fit(signal)
@@ -125,7 +116,7 @@ def merge_stage(stage_params, signal):
 
 
 
-def baseline_correction(stage_params, smoothed_signal, movie_length, thresholds,
+def baseline_correction(stage_params, smoothed_signal, movie_length, stds,
                         nucleotide_sequence):
     # ---------------------- Merge stages ----------------------
     #k_label = intensity_classification_kmeans(stage_params['intensity'].to_numpy().reshape(-1, 1))
@@ -148,10 +139,23 @@ def baseline_correction(stage_params, smoothed_signal, movie_length, thresholds,
 
         for k in np.arange(0, 4):
             same_k_stage = subset[subset['k_label'] == k]
-            total_duration = (same_k_stage['end'] - same_k_stage['start']).sum()
+            durations = same_k_stage['end'] - same_k_stage['start']
+            total_duration = durations.sum()
+
             # if the total duration of a certain k_label is too small it can be noise
+<<<<<<< Updated upstream
             if total_duration > movie_length // 10:
                 baseline = np.median(same_k_stage['intensity'])
+=======
+            duration_mask = durations > movie_length // 10
+            if np.any(duration_mask):
+                baseline = same_k_stage.loc[duration_mask, 'intensity'].min()
+                break
+
+            # if lack of a single stage long enough to be considered as base
+            if total_duration > movie_length // 5:
+                baseline = np.average(same_k_stage['intensity'], weights=durations)
+>>>>>>> Stashed changes
                 break
 
         if np.isnan(baseline):
@@ -164,19 +168,38 @@ def baseline_correction(stage_params, smoothed_signal, movie_length, thresholds,
 
     # ---------------------- Assign stages into 2 classes on and off ----------------------
     # k-means clustering again after intensity correction and update k-labels
-    threshold_column = stage_params['nucleotide'].apply(lambda x: thresholds[nucleotide_sequence.index(x)])
-    new_k_label = (stage_params['intensity'] > threshold_column).astype(int)
-    stage_params['k_label'] = new_k_label
+    ratio = stds.max() / stds.min()
+    #print(ratio)
+    if ratio >= 4:
+        k_label = intensity_classification_Aggo(stage_params['intensity'].to_numpy().reshape(-1, 1), num_class=3)
+        k_label = (k_label > 0).astype(int)
+        stage_params['k_label'] = k_label
 
-    # new_k_label_k = intensity_classification_Aggo(stage_params['intensity'].to_numpy().reshape(-1, 1), num_class=3)
-    # # new_k_label_t = stage_params['intensity'].to_numpy() > threshold
-    # new_k_label = new_k_label_k > 0
-    # stage_params['k_label'] = new_k_label.astype(int)
-    # new_k_label = np.all(np.vstack((new_k_label_t, new_k_label_k)), axis=0)
-    # stage_params['k_label'] = new_k_label.astype(int)
+    elif 2 < ratio < 4:
+        threshold = stage_params['intensity'].max() / 3
+        k_label = (stage_params['intensity'] >= threshold).astype(int)
+        stage_params['k_label'] = k_label
+
+    else: #  all or none of the nucleotides are binding
+        possible_k_label = intensity_classification_Aggo(stage_params['intensity'].to_numpy().reshape(-1, 1), num_class=3)
+        stage_params['k_label'] = possible_k_label
+        possible_intensity = stage_params.groupby('k_label')['intensity'].mean()
+        possible_intensity_diff = np.diff(possible_intensity.sort_values().to_numpy())
+        # print(possible_intensity_diff)
+        # print(stds)
+        # if the difference between the mean intensity of the two classes is too large
+        if np.any(possible_intensity_diff > 3 * stds.max()):
+            stage_params['k_label'] = (possible_k_label > 0).astype(int)
+        else:
+            stage_params['k_label'] = (stage_params['intensity'] > 1.5 * stds.max()).astype(int)
+
+
+    # threshold_column = stage_params['nucleotide'].apply(lambda x: stds[nucleotide_sequence.index(x)])
+    # new_k_label = (stage_params['intensity'] > threshold_column).astype(int)
+    # stage_params['k_label'] = new_k_label
 
     # merge again
-    #stage_params = merge_stage(stage_params, base_corrected_signal)
+    stage_params = merge_stage(stage_params, base_corrected_signal)
 
     # ---------------------- Correct k_label ----------------------
     # in case baseline correction or classification is wrong
@@ -198,12 +221,14 @@ def baseline_correction(stage_params, smoothed_signal, movie_length, thresholds,
 def PELT_trace_fitting(id, original_signal_list, display=False):
     movie_length = len(original_signal_list[0])
     nucleotide_sequence = ['A', 'T', 'C', 'G']
-    intensity_stds = [np.std(s) for s in original_signal_list]
-    #intensity_threshold = min(intensity_stds)
+    intensity_stds = np.array([np.std(s) for s in original_signal_list])
+
+    if np.any(intensity_stds == 0):
+        return id, 4, 0
 
     # ------------- Change point analysis creating stage_params ----------------------
     stage_params = []
-    signal = []
+    smoothed_signal = []
     for i in np.arange(4):
         signal_one_nuc = original_signal_list[i]
         # change point analysis
@@ -213,14 +238,14 @@ def PELT_trace_fitting(id, original_signal_list, display=False):
         stage_param_one_nuc['end'] = stage_param_one_nuc['end'] + movie_length * i
 
         stage_params.append(stage_param_one_nuc)
-        signal.append(smoothed_signal_one_nuc)
+        smoothed_signal.append(smoothed_signal_one_nuc)
 
     # Concatenate the results
     stage_params = pd.concat(stage_params, axis=0)
-    signal = np.concatenate(signal, axis=0)
+    smoothed_signal = np.concatenate(smoothed_signal, axis=0)
 
     # baseline correction and stage merging
-    stage_params, signal = baseline_correction(stage_params, signal, movie_length, intensity_stds, nucleotide_sequence)
+    stage_params, signal = baseline_correction(stage_params, smoothed_signal, movie_length, intensity_stds, nucleotide_sequence)
 
 
     # -------------Calculate binding parameters for each nucleotide --------------
@@ -291,13 +316,13 @@ def trace_arrange(file_path, pattern):
         if len(subset.columns) == 4:
             for name in subset.columns:
                 nucleotide = re.search(pattern, name).group(1)
-                if nucleotide == 'A':
+                if nucleotide == 'A' or nucleotide == 'a':
                     A_traces[id] = subset[name]
-                elif nucleotide == 'T':
+                elif nucleotide == 'T' or nucleotide == 't':
                     T_traces[id] = subset[name]
-                elif nucleotide == 'C':
+                elif nucleotide == 'C' or nucleotide == 'c':
                     C_traces[id] = subset[name]
-                elif nucleotide == 'G':
+                elif nucleotide == 'G' or nucleotide == 'g':
                     G_traces[id] = subset[name]
                 else:
                     raise ValueError('did not match any nucleotide')
@@ -346,15 +371,49 @@ def Gapseq_data_analysis(read_path, pattern=r'', display=False, save=True, id_li
 
 
 if __name__ == '__main__':
-    # #path = "H:/jagadish_data/5 base/position 7/GAP-seq_5ntseq_position7_dex10%formamide2_gapseq.csv"
-    path = "H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq.csv"
-    # #path = "H:/jagadish_data/5 base/position 9/5nt_13GAP_pos9_dex15%__form20%_seqeucing_degen2uM_seal9A4uM_gapseq.csv"
-    Gapseq_data_analysis(path, pattern=r'_s7([A-Z])_.', display=False, save=True)
+    # path = "H:/jagadish_data/5 base/position 7/GAP-seq_5ntseq_position7_dex10%formamide2_gapseq.csv"
+    # pattern = r'_seal7([A-Z])4uM_.'
 
+    # path = "H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq.csv"
+    # pattern = r'_s7([A-Z])_'
 
+    # path = "H:/jagadish_data/single base/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq.csv"
+    # pattern = r'_s7([A-Z])_'
+
+    # path = "H:/jagadish_data/3 base/base recognition/position 5/GAP13nt_position5_comp750nM_degen500nM_buffer20%formamide_GAP13nt_L532Exp200_gapseq.csv"
+    # pattern = r'_comp5([A-Za-z])_'
+
+    # path = "H:/jagadish_data/3 base/base recognition/position 6/GAP13nt_position6_comp1uM_degen1uM_buffer20%formamide_GAP13nt_L532L638_Seal6A_degen1uM_gapseq.csv"
+    # pattern = r'_Seal6([A-Z])_'
+
+    # path = "H:/jagadish_data/5 base/position 5/5nt_13GAP_pos5_dex20%__seqeucing_S5A_5uM_degen2uM_gapseq.csv"
+    # pattern = r'_S5([A-Z])_'
+
+    # path = "H:/jagadish_data/5 base/position 6/5nt_13GAP_pos6_dex15%__form20%_seqeucing1_degen2uM_s6A4uM_gapseq.csv"
+    # pattern = r'_s6([A-Za-z])4uM'
+
+    # path = "H:/jagadish_data/5 base/position 6/5nt_13GAP_pos6_dex15%__form20%_seqeucing2_degen2uM_s6A4uM_gapseq.csv"
+    # pattern = r'_s6([A-Za-z])4uM'
+
+    # path = "H:/jagadish_data/5 base/position 8/GAP-seq_5ntseq_position8_dex13%formamide7%_GAPlocalizationL532Exp200_gapseq.csv"
+    # pattern = r'_Seal8([A-Z])4uM_'
+
+    path = "H:/jagadish_data/5 base/position 9/5nt_13GAP_pos9_dex15%__form20%_seqeucing_degen2uM_seal9A4uM_gapseq.csv"
+    pattern = r'_seal9([A-Z])4uM'
+
+    # params = pd.read_csv("H:/jagadish_data/5 base/position 5/5nt_13GAP_pos5_dex20%__seqeucing_S5A_5uM_degen2uM_gapseq_PELT_detection_result.csv")
+    # params = params[params['Outlier'] != 'No signal']
+    # params = params[params['Confident Level'] > 0.5]
+    # ids = params['ID'].astype(str).to_list()
+
+    Gapseq_data_analysis(path, pattern=pattern, display=False, save=True)
+
+<<<<<<< Updated upstream
     #param = pd.read_csv("H:/jagadish_data/5 base/position 7/GAP-seq_5ntseq_position7_dex10%formamide2_gapseq_PELT_detection_result.csv")
     # param = pd.read_csv("H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq_PELT_detection_result.csv")
     # param = param[param['Confident Level'] > 0.5]
     # ids = param['ID'].astype(str).to_list()
     # Gapseq_data_analysis("H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq.csv",
     #                      pattern=r'_s7([A-Z])_', display=True, save=True, id_list=ids)
+=======
+>>>>>>> Stashed changes
