@@ -149,7 +149,7 @@ def baseline_correction(stage_params, smoothed_signal, movie_length, stds,
                 break
 
             # if lack of a single stage long enough to be considered as base
-            if total_duration > movie_length // 5:
+            if total_duration > movie_length // 10:
                 baseline = np.average(same_k_stage['intensity'], weights=durations)
                 break
 
@@ -164,6 +164,7 @@ def baseline_correction(stage_params, smoothed_signal, movie_length, stds,
     # ---------------------- Assign stages into 2 classes on and off ----------------------
     # k-means clustering again after intensity correction and update k-labels
     ratio = stds.max() / stds.min()
+    #print(ratio)
     if ratio >= 4:
         k_label = intensity_classification_Aggo(stage_params['intensity'].to_numpy().reshape(-1, 1), num_class=3)
         k_label = (k_label > 0).astype(int)
@@ -391,5 +392,5 @@ if __name__ == '__main__':
     # params = params[params['Confident Level'] > 0.5]
     # ids = params['ID'].astype(str).to_list()
 
-    Gapseq_data_analysis(path, pattern=pattern, display=False, save=True)
+    Gapseq_data_analysis(path, pattern=pattern, display=True, save=True)
 
