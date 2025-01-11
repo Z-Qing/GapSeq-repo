@@ -142,7 +142,7 @@ def baseline_correction(stage_params, smoothed_signal, movie_length, stds,
             durations = same_k_stage['end'] - same_k_stage['start']
             total_duration = durations.sum()
 
-            # if the total duration of a certain k_label is too small it can be noise
+            # if the total duration of a certain stage is too small it can be noise
             duration_mask = durations > movie_length // 10
             if np.any(duration_mask):
                 baseline = same_k_stage.loc[duration_mask, 'intensity'].min()
@@ -164,7 +164,6 @@ def baseline_correction(stage_params, smoothed_signal, movie_length, stds,
     # ---------------------- Assign stages into 2 classes on and off ----------------------
     # k-means clustering again after intensity correction and update k-labels
     ratio = stds.max() / stds.min()
-    #print(ratio)
     if ratio >= 4:
         k_label = intensity_classification_Aggo(stage_params['intensity'].to_numpy().reshape(-1, 1), num_class=3)
         k_label = (k_label > 0).astype(int)
@@ -180,18 +179,11 @@ def baseline_correction(stage_params, smoothed_signal, movie_length, stds,
         stage_params['k_label'] = possible_k_label
         possible_intensity = stage_params.groupby('k_label')['intensity'].mean()
         possible_intensity_diff = np.diff(possible_intensity.sort_values().to_numpy())
-        # print(possible_intensity_diff)
-        # print(stds)
-        # if the difference between the mean intensity of the two classes is too large
+
         if np.any(possible_intensity_diff > 3 * stds.max()):
             stage_params['k_label'] = (possible_k_label > 0).astype(int)
         else:
             stage_params['k_label'] = (stage_params['intensity'] > 1.5 * stds.max()).astype(int)
-
-
-    # threshold_column = stage_params['nucleotide'].apply(lambda x: stds[nucleotide_sequence.index(x)])
-    # new_k_label = (stage_params['intensity'] > threshold_column).astype(int)
-    # stage_params['k_label'] = new_k_label
 
     # merge again
     stage_params = merge_stage(stage_params, base_corrected_signal)
@@ -273,8 +265,6 @@ def PELT_trace_fitting(id, original_signal_list, display=False):
         original_signals = np.concatenate(original_signal_list, axis=0)
         plt.plot(np.arange(len(original_signals)), original_signals, label='Original Signal')
         plt.plot(np.arange(len(signal)), signal, label='Corrected Signal')
-
-        #plt.hlines(xmin=0, xmax=len(signal), y=ref_int, color='black', linestyle='--', label='Threshold')
 
         colors = ['green', 'red']
         pre_intensity = 0
