@@ -48,10 +48,10 @@ def outlier_detect(original_binding_params, user_thresholds):
 
 def change_point_analysis(original_signal, mini_size=5):
     # Smooth the signal using Savitzky-Golay filter and low-pass Butterworth filter
-    signal = savgol_filter(original_signal, 10, 5)
+    signal = savgol_filter(original_signal, 11, 5)
     b, a = butter(3, 0.1, btype='low')
     signal = lfilter(b, a, signal)
-    signal = np.convolve(signal, np.ones(5) / 5, mode='same')
+    signal = np.convolve(signal, np.ones(10) / 10, mode='same')
 
     # Detect change points using the PELT algorithm with linear kernel
     algo = rpt.KernelCPD(kernel='linear', min_size=mini_size).fit(signal)
@@ -143,10 +143,6 @@ def baseline_correction(stage_params, smoothed_signal, movie_length, stds,
             total_duration = durations.sum()
 
             # if the total duration of a certain k_label is too small it can be noise
-<<<<<<< Updated upstream
-            if total_duration > movie_length // 10:
-                baseline = np.median(same_k_stage['intensity'])
-=======
             duration_mask = durations > movie_length // 10
             if np.any(duration_mask):
                 baseline = same_k_stage.loc[duration_mask, 'intensity'].min()
@@ -155,7 +151,6 @@ def baseline_correction(stage_params, smoothed_signal, movie_length, stds,
             # if lack of a single stage long enough to be considered as base
             if total_duration > movie_length // 5:
                 baseline = np.average(same_k_stage['intensity'], weights=durations)
->>>>>>> Stashed changes
                 break
 
         if np.isnan(baseline):
@@ -408,12 +403,3 @@ if __name__ == '__main__':
 
     Gapseq_data_analysis(path, pattern=pattern, display=False, save=True)
 
-<<<<<<< Updated upstream
-    #param = pd.read_csv("H:/jagadish_data/5 base/position 7/GAP-seq_5ntseq_position7_dex10%formamide2_gapseq_PELT_detection_result.csv")
-    # param = pd.read_csv("H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq_PELT_detection_result.csv")
-    # param = param[param['Confident Level'] > 0.5]
-    # ids = param['ID'].astype(str).to_list()
-    # Gapseq_data_analysis("H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq.csv",
-    #                      pattern=r'_s7([A-Z])_', display=True, save=True, id_list=ids)
-=======
->>>>>>> Stashed changes
