@@ -7,6 +7,8 @@ import numpy as np
 from scipy.signal import butter, lfilter
 from sklearn.cluster import AgglomerativeClustering
 import re
+#from sklearn.preprocessing import MinMaxScaler
+from skimage.restoration import denoise_tv_chambolle
 
 
 def outlier_detect(original_binding_params, user_thresholds):
@@ -19,9 +21,10 @@ def outlier_detect(original_binding_params, user_thresholds):
     total_activity = np.sum(binding_params, axis=0)
 
     scores = (total_activity - binding_params) / total_activity
+    #scores = MinMaxScaler().fit_transform(scores)
     scores = np.sum(scores, axis=1)
 
-    temperature = 0.5
+    temperature = 0.25
     exp_scores = np.exp(scores / temperature)
 
     softmax = exp_scores / np.sum(exp_scores)
@@ -33,9 +36,9 @@ def outlier_detect(original_binding_params, user_thresholds):
     ratio = np.clip(original_binding_params[most_active_index] / user_thresholds, 0, 1)
     #mag = ratio.mean()
     #mag = 1.0 - np.prod(1.0 - ratio)
-    p = 0.25
+    p = 3
     mag = ((ratio ** p).mean()) ** (1 / p)
-    #
+
     # print(mag)
     # print(softmax)
 
@@ -47,8 +50,11 @@ def outlier_detect(original_binding_params, user_thresholds):
 
 
 def change_point_analysis(original_signal, mini_size=5):
-    # Smooth the signal using Savitzky-Golay filter and low-pass Butterworth filter
-    signal = savgol_filter(original_signal, 11, 5)
+    # remove linear trend and then smooth the signal with low-pass Butterworth filter
+    signal = denoise_tv_chambolle(original_signal, weight=1.5)
+    #signal = detrend(signal)
+    signal = savgol_filter(signal, 10, 1)
+
     b, a = butter(3, 0.1, btype='low')
     signal = lfilter(b, a, signal)
     signal = np.convolve(signal, np.ones(10) / 10, mode='same')
@@ -165,26 +171,27 @@ def baseline_correction(stage_params, smoothed_signal, movie_length, stds,
     # k-means clustering again after intensity correction and update k-labels
     ratio = stds.max() / stds.min()
     #print(ratio)
-    if ratio >= 4:
+    if ratio > 2:
         k_label = intensity_classification_Aggo(stage_params['intensity'].to_numpy().reshape(-1, 1), num_class=3)
         k_label = (k_label > 0).astype(int)
         stage_params['k_label'] = k_label
 
-    elif 2 < ratio < 4:
-        threshold = stage_params['intensity'].max() / 3
-        k_label = (stage_params['intensity'] >= threshold).astype(int)
-        stage_params['k_label'] = k_label
+    # elif 2 < ratio < 4:
+    #     threshold = stage_params['intensity'].max() / 3
+    #     k_label = (stage_params['intensity'] >= threshold).astype(int)
+    #     stage_params['k_label'] = k_label
 
     else: #  all or none of the nucleotides are binding
-        possible_k_label = intensity_classification_Aggo(stage_params['intensity'].to_numpy().reshape(-1, 1), num_class=3)
-        stage_params['k_label'] = possible_k_label
-        possible_intensity = stage_params.groupby('k_label')['intensity'].mean()
-        possible_intensity_diff = np.diff(possible_intensity.sort_values().to_numpy())
+        # stage_params['k_label'] = possible_k_label
+        # possible_intensity = stage_params.groupby('k_label')['intensity'].mean()
+        # possible_intensity_diff = np.diff(possible_intensity.sort_values().to_numpy())
 
-        if np.any(possible_intensity_diff > 3 * stds.max()):
-            stage_params['k_label'] = (possible_k_label > 0).astype(int)
+        if np.any(stage_params['intensity'] > 3 * stds.max()):
+            k_label = intensity_classification_Aggo(stage_params['intensity'].to_numpy().reshape(-1, 1), num_class=3)
+            stage_params['k_label'] = (k_label > 0).astype(int)
         else:
-            stage_params['k_label'] = (stage_params['intensity'] > 1.5 * stds.max()).astype(int)
+            threshold_column = stage_params['nucleotide'].apply(lambda x: stds[nucleotide_sequence.index(x)])
+            stage_params['k_label'] = (stage_params['intensity'] > 1.5 * threshold_column).astype(int)
 
     # merge again
     stage_params = merge_stage(stage_params, base_corrected_signal)
@@ -372,8 +379,8 @@ if __name__ == '__main__':
     # path = "H:/jagadish_data/3 base/base recognition/position 6/GAP13nt_position6_comp1uM_degen1uM_buffer20%formamide_GAP13nt_L532L638_Seal6A_degen1uM_gapseq.csv"
     # pattern = r'_Seal6([A-Z])_'
 
-    # path = "H:/jagadish_data/5 base/position 5/5nt_13GAP_pos5_dex20%__seqeucing_S5A_5uM_degen2uM_gapseq.csv"
-    # pattern = r'_S5([A-Z])_'
+    path = "H:/jagadish_data/5 base/position 5/5nt_13GAP_pos5_dex20%__seqeucing_S5A_5uM_degen2uM_gapseq.csv"
+    pattern = r'_S5([A-Z])_'
 
     # path = "H:/jagadish_data/5 base/position 6/5nt_13GAP_pos6_dex15%__form20%_seqeucing1_degen2uM_s6A4uM_gapseq.csv"
     # pattern = r'_s6([A-Za-z])4uM'
@@ -389,7 +396,7 @@ if __name__ == '__main__':
 
     # params = pd.read_csv("H:/jagadish_data/5 base/position 5/5nt_13GAP_pos5_dex20%__seqeucing_S5A_5uM_degen2uM_gapseq_PELT_detection_result.csv")
     # params = params[params['Outlier'] != 'No signal']
-    # params = params[params['Confident Level'] > 0.5]
+    # #params = params[params['Confident Level'] > 0.5]
     # ids = params['ID'].astype(str).to_list()
 
     Gapseq_data_analysis(path, pattern=pattern, display=True, save=True)
