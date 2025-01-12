@@ -170,28 +170,23 @@ def baseline_correction(stage_params, smoothed_signal, movie_length, stds,
     # ---------------------- Assign stages into 2 classes on and off ----------------------
     # k-means clustering again after intensity correction and update k-labels
     ratio = stds.max() / stds.min()
-    #print(ratio)
-    if ratio > 2:
+    if ratio >= 4:
         k_label = intensity_classification_Aggo(stage_params['intensity'].to_numpy().reshape(-1, 1), num_class=3)
         k_label = (k_label > 0).astype(int)
         stage_params['k_label'] = k_label
 
-    # elif 2 < ratio < 4:
-    #     threshold = stage_params['intensity'].max() / 3
-    #     k_label = (stage_params['intensity'] >= threshold).astype(int)
-    #     stage_params['k_label'] = k_label
+    elif 2 < ratio < 4:
+        threshold = stage_params['intensity'].max() / 3
+        k_label = (stage_params['intensity'] >= threshold).astype(int)
+        stage_params['k_label'] = k_label
 
-    else: #  all or none of the nucleotides are binding
-        # stage_params['k_label'] = possible_k_label
-        # possible_intensity = stage_params.groupby('k_label')['intensity'].mean()
-        # possible_intensity_diff = np.diff(possible_intensity.sort_values().to_numpy())
-
+    else:  # all or none of the nucleotides are binding
         if np.any(stage_params['intensity'] > 3 * stds.max()):
             k_label = intensity_classification_Aggo(stage_params['intensity'].to_numpy().reshape(-1, 1), num_class=3)
-            stage_params['k_label'] = (k_label > 0).astype(int)
+            k_label = (k_label > 0).astype(int)
+            stage_params['k_label'] = k_label
         else:
-            threshold_column = stage_params['nucleotide'].apply(lambda x: stds[nucleotide_sequence.index(x)])
-            stage_params['k_label'] = (stage_params['intensity'] > 1.5 * threshold_column).astype(int)
+            stage_params['k_label'] = (stage_params['intensity'] > 1.5 * max(stds)).astype(int)
 
     # merge again
     stage_params = merge_stage(stage_params, base_corrected_signal)
@@ -367,8 +362,8 @@ if __name__ == '__main__':
     # path = "H:/jagadish_data/5 base/position 7/GAP-seq_5ntseq_position7_dex10%formamide2_gapseq.csv"
     # pattern = r'_seal7([A-Z])4uM_.'
 
-    # path = "H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq.csv"
-    # pattern = r'_s7([A-Z])_'
+    path = "H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq.csv"
+    pattern = r'_s7([A-Z])_'
 
     # path = "H:/jagadish_data/single base/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq.csv"
     # pattern = r'_s7([A-Z])_'
@@ -379,8 +374,8 @@ if __name__ == '__main__':
     # path = "H:/jagadish_data/3 base/base recognition/position 6/GAP13nt_position6_comp1uM_degen1uM_buffer20%formamide_GAP13nt_L532L638_Seal6A_degen1uM_gapseq.csv"
     # pattern = r'_Seal6([A-Z])_'
 
-    path = "H:/jagadish_data/5 base/position 5/5nt_13GAP_pos5_dex20%__seqeucing_S5A_5uM_degen2uM_gapseq.csv"
-    pattern = r'_S5([A-Z])_'
+    # path = "H:/jagadish_data/5 base/position 5/5nt_13GAP_pos5_dex20%__seqeucing_S5A_5uM_degen2uM_gapseq.csv"
+    # pattern = r'_S5([A-Z])_'
 
     # path = "H:/jagadish_data/5 base/position 6/5nt_13GAP_pos6_dex15%__form20%_seqeucing1_degen2uM_s6A4uM_gapseq.csv"
     # pattern = r'_s6([A-Za-z])4uM'
@@ -391,13 +386,13 @@ if __name__ == '__main__':
     # path = "H:/jagadish_data/5 base/position 8/GAP-seq_5ntseq_position8_dex13%formamide7%_GAPlocalizationL532Exp200_gapseq.csv"
     # pattern = r'_Seal8([A-Z])4uM_'
 
-    path = "H:/jagadish_data/5 base/position 9/5nt_13GAP_pos9_dex15%__form20%_seqeucing_degen2uM_seal9A4uM_gapseq.csv"
-    pattern = r'_seal9([A-Z])4uM'
+    # path = "H:/jagadish_data/5 base/position 9/5nt_13GAP_pos9_dex15%__form20%_seqeucing_degen2uM_seal9A4uM_gapseq.csv"
+    # pattern = r'_seal9([A-Z])4uM'
 
     # params = pd.read_csv("H:/jagadish_data/5 base/position 5/5nt_13GAP_pos5_dex20%__seqeucing_S5A_5uM_degen2uM_gapseq_PELT_detection_result.csv")
     # params = params[params['Outlier'] != 'No signal']
     # #params = params[params['Confident Level'] > 0.5]
     # ids = params['ID'].astype(str).to_list()
 
-    Gapseq_data_analysis(path, pattern=pattern, display=True, save=True)
+    Gapseq_data_analysis(path, pattern=pattern, display=False, save=True)
 
