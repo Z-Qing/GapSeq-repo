@@ -9,6 +9,41 @@ from scipy.stats import linregress
 from scipy.signal import savgol_filter
 
 
+def non_competitive_outlier_detect(original_binding_params, user_thresholds):
+    if np.all(original_binding_params == 0):
+        return 4, 0
+
+    binding_params = original_binding_params.copy()
+    total_activity = np.sum(binding_params, axis=0)
+
+    if np.any(total_activity == 0):
+        return 4, 0
+
+    scores = binding_params / total_activity
+    # scores = MinMaxScaler().fit_transform(scores)
+    scores = np.sum(scores, axis=1)
+
+    temperature = 0.5
+    exp_scores = np.exp(scores / temperature)
+
+    softmax = exp_scores / np.sum(exp_scores)
+
+    outlier_index = np.argmax(softmax)
+
+    ratio = np.clip(original_binding_params[outlier_index] / user_thresholds, 0, 1)
+    #mag = ratio.mean()
+    # mag = 1.0 - np.prod(1.0 - ratio)
+    p = 3
+    mag = ((ratio ** p).mean()) ** (1 / p)
+
+    # print(mag)
+    # print(softmax)
+
+    confidence = mag * softmax[outlier_index]
+
+    return outlier_index, confidence
+
+
 def outlier_detect(original_binding_params, user_thresholds):
     # 1. Basic sanity checks
     if np.sum(original_binding_params == 0) > 3:
@@ -198,7 +233,7 @@ def baseline_correction(original_stage_params, signal, movie_length):
             break
 
         # if lack of a single stage long enough to be considered as base
-        if total_duration_same_k > movie_length // 10:
+        if total_duration_same_k > movie_length // 10 or len(same_k_stage) >= 3:
             baseline = np.average(same_k_stage['intensity'], weights=durations_same_k)
             break
 
@@ -262,7 +297,7 @@ def binary_classification(stage_params, movie_length, signals, nucleotide_sequen
     return corrected_stage_params, corrected_signal
 
 
-def PELT_trace_fitting(id, original_signal_list, display=False):
+def PELT_trace_fitting(id, original_signal_list, comp_exp, display=False):
     movie_length = len(original_signal_list[0])
     nucleotide_sequence = ['A', 'T', 'C', 'G']
     intensity_stds = np.array([np.std(s) for s in original_signal_list])
@@ -313,7 +348,10 @@ def PELT_trace_fitting(id, original_signal_list, display=False):
         binding_params.loc[n] = [total_binding_duration, binding_event_num, avg_binding_intensity]
 
     # detect outliers
-    outlier, confident = outlier_detect(binding_params.to_numpy(), np.array([500, 10, 2 * min(intensity_stds)]))
+    if comp_exp:
+        outlier, confident = non_competitive_outlier_detect(binding_params.to_numpy(), np.array([500, 10, 2 * min(intensity_stds)]))
+    else:
+        outlier, confident = outlier_detect(binding_params.to_numpy(), np.array([500, 10, 2 * min(intensity_stds)]))
 
     # Display the results
     if display:
@@ -378,7 +416,7 @@ def trace_arrange(file_path, pattern):
     return A_traces, T_traces, C_traces, G_traces
 
 
-def Gapseq_data_analysis(read_path, pattern=r'', display=False, save=True, id_list=None):
+def Gapseq_data_analysis(read_path, pattern=r'', comp_exp=False, display=False, save=True, id_list=None):
     A_traces, T_traces, C_traces, G_traces = trace_arrange(read_path, pattern)
 
     if id_list is None:
@@ -387,7 +425,7 @@ def Gapseq_data_analysis(read_path, pattern=r'', display=False, save=True, id_li
     process_params = []
     for id in id_list:
         trace_set = [A_traces[id], T_traces[id], C_traces[id], G_traces[id]]
-        process_params.append((id, trace_set, display))
+        process_params.append((id, trace_set, comp_exp, display))
 
     # Release memory for data that won't be used anymore
     del A_traces, T_traces, C_traces, G_traces
@@ -419,8 +457,8 @@ def Gapseq_data_analysis(read_path, pattern=r'', display=False, save=True, id_li
 
 
 if __name__ == '__main__':
-    path = "H:/jagadish_data/single base/GAP_T_Comp_degenbindingcheck100nM_degen100nM_dex10%seal3A100nM_gapseq.csv"
-    pattern = r'seal3([A-Z])100nM'
+    # path = "H:/jagadish_data/single base/GAP_T_Comp_degenbindingcheck100nM_degen100nM_dex10%seal3A100nM_gapseq.csv"
+    # pattern = r'seal3([A-Z])100nM'
 
     # path = "H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq.csv"
     # pattern = r'_s7([A-Z])_'
@@ -437,4 +475,7 @@ if __name__ == '__main__':
     # param = param[param['Confident Level'] > 0.5]
     # ids = param['ID'].astype(str)
 
-    Gapseq_data_analysis(path, pattern=pattern, display=False, save=True)
+    path = "H:/Jagadish_data/non_complementary/GAP_30T_NonCoomp_seal100nM_1_Localization_gapseq.csv"
+    pattern = r'_seal3([A-Z])_'
+
+    Gapseq_data_analysis(path, pattern=pattern, comp_exp=True, display=False, save=True)
