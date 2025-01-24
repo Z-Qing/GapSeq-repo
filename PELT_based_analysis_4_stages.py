@@ -297,7 +297,7 @@ def binary_classification(stage_params, movie_length, signals, nucleotide_sequen
     return corrected_stage_params, corrected_signal
 
 
-def PELT_trace_fitting(id, original_signal_list, comp_exp, display=False):
+def PELT_trace_fitting(id, original_signal_list, non_comp_exp, display=False):
     movie_length = len(original_signal_list[0])
     nucleotide_sequence = ['A', 'T', 'C', 'G']
     intensity_stds = np.array([np.std(s) for s in original_signal_list])
@@ -348,7 +348,7 @@ def PELT_trace_fitting(id, original_signal_list, comp_exp, display=False):
         binding_params.loc[n] = [total_binding_duration, binding_event_num, avg_binding_intensity]
 
     # detect outliers
-    if comp_exp:
+    if non_comp_exp:
         outlier, confident = non_competitive_outlier_detect(binding_params.to_numpy(), np.array([500, 10, 2 * min(intensity_stds)]))
     else:
         outlier, confident = outlier_detect(binding_params.to_numpy(), np.array([500, 10, 2 * min(intensity_stds)]))
@@ -416,7 +416,7 @@ def trace_arrange(file_path, pattern):
     return A_traces, T_traces, C_traces, G_traces
 
 
-def Gapseq_data_analysis(read_path, pattern=r'', comp_exp=False, display=False, save=True, id_list=None):
+def Gapseq_data_analysis(read_path, pattern=r'', non_comp_exp=False, display=False, save=True, id_list=None):
     A_traces, T_traces, C_traces, G_traces = trace_arrange(read_path, pattern)
 
     if id_list is None:
@@ -425,7 +425,7 @@ def Gapseq_data_analysis(read_path, pattern=r'', comp_exp=False, display=False, 
     process_params = []
     for id in id_list:
         trace_set = [A_traces[id], T_traces[id], C_traces[id], G_traces[id]]
-        process_params.append((id, trace_set, comp_exp, display))
+        process_params.append((id, trace_set, non_comp_exp, display))
 
     # Release memory for data that won't be used anymore
     del A_traces, T_traces, C_traces, G_traces
@@ -478,4 +478,4 @@ if __name__ == '__main__':
     path = "H:/Jagadish_data/non_complementary/GAP_30T_NonCoomp_seal100nM_1_Localization_gapseq.csv"
     pattern = r'_seal3([A-Z])_'
 
-    Gapseq_data_analysis(path, pattern=pattern, comp_exp=True, display=False, save=True)
+    Gapseq_data_analysis(path, pattern=pattern, non_comp_exp=True, display=False, save=True)
