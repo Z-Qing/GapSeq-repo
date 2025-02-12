@@ -272,8 +272,8 @@ def binary_classification(stage_params, movie_length, signals, nucleotide_sequen
     corrected_stage_params = pd.concat(corrected_stage_params, axis=0, ignore_index=True)
 
     # ---------------------- Assign stages into 2 classes on and off ----------------------
-    threshold_column = 4 * corrected_stage_params['nucleotide'].apply(lambda x: long_stage_std_list[nucleotide_sequence.index(x)])
-    threshold = 1/3 * corrected_stage_params['intensity'].max()
+    threshold_column = 3 * corrected_stage_params['nucleotide'].apply(lambda x: long_stage_std_list[nucleotide_sequence.index(x)])
+    threshold = 1/3.3 * corrected_stage_params['intensity'].max()
     threshold_column = np.where(threshold_column < threshold, threshold, threshold_column)
 
     k_label = (corrected_stage_params['intensity'] > threshold_column).astype(int)
@@ -297,7 +297,7 @@ def binary_classification(stage_params, movie_length, signals, nucleotide_sequen
     return corrected_stage_params, corrected_signal
 
 
-def PELT_trace_fitting(id, original_signal_list, non_comp_exp, display=False):
+def PELT_trace_fitting(id, original_signal_list, comp_exp, display=False):
     movie_length = len(original_signal_list[0])
     nucleotide_sequence = ['A', 'T', 'C', 'G']
     intensity_stds = np.array([np.std(s) for s in original_signal_list])
@@ -348,10 +348,11 @@ def PELT_trace_fitting(id, original_signal_list, non_comp_exp, display=False):
         binding_params.loc[n] = [total_binding_duration, binding_event_num, avg_binding_intensity]
 
     # detect outliers
-    if non_comp_exp:
-        outlier, confident = non_competitive_outlier_detect(binding_params.to_numpy(), np.array([500, 10, 2 * min(intensity_stds)]))
-    else:
+    if comp_exp:
         outlier, confident = outlier_detect(binding_params.to_numpy(), np.array([500, 10, 2 * min(intensity_stds)]))
+    else:
+        outlier, confident = non_competitive_outlier_detect(binding_params.to_numpy(),
+                                                            np.array([500, 10, 2 * min(intensity_stds)]))
 
     # Display the results
     if display:
@@ -416,7 +417,7 @@ def trace_arrange(file_path, pattern):
     return A_traces, T_traces, C_traces, G_traces
 
 
-def Gapseq_data_analysis(read_path, pattern=r'', non_comp_exp=False, display=False, save=True, id_list=None):
+def Gapseq_data_analysis(read_path, pattern=r'', comp_exp=True, display=False, save=True, id_list=None):
     A_traces, T_traces, C_traces, G_traces = trace_arrange(read_path, pattern)
 
     if id_list is None:
@@ -425,7 +426,7 @@ def Gapseq_data_analysis(read_path, pattern=r'', non_comp_exp=False, display=Fal
     process_params = []
     for id in id_list:
         trace_set = [A_traces[id], T_traces[id], C_traces[id], G_traces[id]]
-        process_params.append((id, trace_set, non_comp_exp, display))
+        process_params.append((id, trace_set, comp_exp, display))
 
     # Release memory for data that won't be used anymore
     del A_traces, T_traces, C_traces, G_traces
@@ -475,7 +476,10 @@ if __name__ == '__main__':
     # param = param[param['Confident Level'] > 0.5]
     # ids = param['ID'].astype(str)
 
-    path = "H:/Jagadish_data/non_complementary/GAP_30T_NonCoomp_seal100nM_1_Localization_gapseq.csv"
-    pattern = r'_seal3([A-Z])_'
+    # path = "H:/Jagadish_data/non_complementary/GAP_30T_NonCoomp_seal100nM_1_Localization_gapseq.csv"
+    # pattern = r'_seal3([A-Z])_'
 
-    Gapseq_data_analysis(path, pattern=pattern, non_comp_exp=True, display=False, save=True)
+    path = "H:\jagadish_data\GAP_A_8nt_comp_df10_GAP_A_Localization_gapseq.csv"
+    pattern = r'S3([A-Z])300nM'
+
+    Gapseq_data_analysis(path, pattern=pattern, comp_exp=True, display=False, save=True)
