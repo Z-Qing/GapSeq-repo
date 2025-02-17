@@ -10,6 +10,7 @@ from tifffile import imwrite, imread
 from multiprocessing import Pool
 from pystackreg import StackReg
 from scipy.ndimage import affine_transform
+import re
 
 # this function is modified from the localize function in picasso.localize
 # and it exports the fitting quality as well
@@ -120,8 +121,15 @@ def channel_alignment(ref, mov):
 
     return aligned_mov
 
+# def channel_alignment(ref, mov):
+#     sr = StackReg(StackReg.RIGID_BODY)
+#     transform_mat = sr.register(ref, mov)
+#     aligned_mov = affine_transform(mov, transform_mat, order=0)
+#
+#     return aligned_mov
 
-def position_correction(dir_path):
+
+def position_correction(dir_path, ref_localization_path, save=False):
     ''' This function contains two steps: 1.acquire localizations from the movie and using aim to calculate the
     drift then apply it to the movie for drift correction 2. acquire the transformation using the average image from the
     movies then apply the same matrix for all frames in movies for channel alignment '''
@@ -129,23 +137,30 @@ def position_correction(dir_path):
     files = os.listdir(dir_path)
     movie_paths = [x for x in files if x.endswith('.tif')]
 
-    drift_free = []
+    drift_free = {}
     for m in movie_paths:
-        drift_free.append(drift_correction(dir_path + '/' + m))
+        drift_free[m] = drift_correction(dir_path + '/' + m)
 
-    ref = drift_free[0].mean(axis=0)
-    imwrite(dir_path + '/' + movie_paths[0].replace('.tif', '_corrected.tif'), drift_free[0])
+    #ref = drift_free[0].mean(axis=0)
+    #imwrite(dir_path + '/' + movie_paths[0].replace('.tif', '_corrected.tif'), drift_free[0])
+    ref = imread(ref_localization_path)
+    ref = ref.mean(axis=0)
 
-    for i in range(1, len(movie_paths)):
-        aligned_movie = channel_alignment(ref, drift_free[i])
-        imwrite(dir_path + '/' + movie_paths[i].replace('.tif', '_corrected.tif'), aligned_movie)
 
-    return
+    pos_corrected = {}
+    for m in movie_paths:
+        aligned_movie = channel_alignment(ref, drift_free[m].sum())
+        pos_corrected[m] = aligned_movie
+        if save:
+            imwrite(dir_path + '/' + m.replace('.tif', '_corrected.tif'), aligned_movie)
+
+    return pos_corrected
+
+
 
 
 if __name__ == "__main__":
     dir_path = ("H:/jagadish_data/channelAlignment_driftCorrection/20250128_7ntGAP_T_Non-comp_degen100nMdex10%form10/movies")
-
     position_correction(dir_path)
 
 

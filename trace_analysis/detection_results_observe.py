@@ -4,11 +4,11 @@ import numpy as np
 
 def observe_confident_distribution(param_path):
     param = pd.read_csv(param_path)
-    param = param[param['Outlier'] != 'No signal']
+    param = param[param['outlier'] != 'No signal']
 
-    for nucleotide in param['Outlier'].unique():
-        subset = param[param['Outlier'] == nucleotide]
-        plt.hist(subset['Confident Level'], label=nucleotide, bins=50, alpha=0.5)
+    for nucleotide in param['outlier'].unique():
+        subset = param[param['outlier'] == nucleotide]
+        plt.hist(subset['confidence'], label=nucleotide, bins=50, alpha=0.5)
 
     plt.legend()
     plt.show()
@@ -22,9 +22,9 @@ def accurate_VS_size(param_path, correct_pick):
     num = []
     confidence_thresholds = []
     for c in np.arange(0, 1.0, 0.025):
-        subset = param[param['Confident Level'] > c]
+        subset = param[param['confidence'] > c]
         if len(subset) > 0:
-            wrong = subset[subset['Outlier'] != correct_pick]
+            wrong = subset[subset['outlier'] != correct_pick]
             r.append(1 - len(wrong) / len(subset))
             num.append(len(subset))
             confidence_thresholds.append(c)
@@ -50,7 +50,7 @@ def accurate_VS_size(param_path, correct_pick):
 
 
 if __name__ == '__main__':
-    path = "H:/jagadish_data/single base/GAP_T_Comp_degenbindingcheck100nM_degen100nM_dex10%seal3A100nM_gapseq_PELT_detection_result.csv"
+    #path = "H:/jagadish_data/single base/GAP_T_Comp_degenbindingcheck100nM_degen100nM_dex10%seal3A100nM_gapseq_PELT_detection_result.csv"
 
     #path = "H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq_PELT_detection_result.csv"
 
@@ -58,6 +58,7 @@ if __name__ == '__main__':
 
     #path = "H:/jagadish_data/3 base/base recognition/position 5/GAP13nt_position5_comp750nM_degen500nM_buffer20%formamide_GAP13nt_L532Exp200_gapseq_PELT_detection_result.csv"
 
+    path = "H:\jagadish_data\GAP_A_8nt_comp_df10_GAP_A_Localization_gapseq_detection_results.csv"
     observe_confident_distribution(path)
-    accurate_VS_size(path, correct_pick='A')
+    #accurate_VS_size(path, correct_pick='T')
 
