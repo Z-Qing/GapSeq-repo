@@ -1,47 +1,49 @@
-import pandas as pd
-from scipy.ndimage import shift as scipy_shift
-import os
 import numpy as np
+from numpy.lib import recfunctions as rfn
+import pandas as pd
 from picasso.gausslq import locs_from_fits_gpufit, initial_parameters_gpufit
 from pygpufit import gpufit as gf
 from picasso.io import load_movie, save_locs
 from picasso.localize import identify_async, identifications_from_futures, get_spots
-from picasso.postprocess import link
 from picasso.aim import aim
-from multiprocessing import Pool
-from pystackreg import StackReg
+from picasso.imageprocess import rcc
+import picasso.render as _render
 import re
-#from scipy.ndimage import affine_transform
+import os
+from sklearn.neighbors import NearestNeighbors
 
 
-class movie_class():
-    def __init__(self, movie, info, frame_range=None, roi=None, baseline=None, sensivity=None, gain=None, qe=None):
-        if roi is not None:
-            movie = movie[:, roi[0]:roi[1], roi[2]:roi[3]]
-            info[0]['Height'] = roi[1] - roi[0]
-            info[0]['Width'] = roi[3] - roi[2]
+class MovieClass():
+    def __init__(self, movie_path, roi=None, frame_range=None):
+        self.movie_path = movie_path
+        self.roi = roi
+        self.frame_range = frame_range
 
-        if frame_range is not None:
-            movie = movie[frame_range[0]:frame_range[1], :, :]
-            info[0]['Frames'] = frame_range[1] - frame_range[0]
-
-        if len(movie.shape) == 2:
-            movie = movie[np.newaxis, :, :]
-
-        self.movie = movie
-
-        self.info = info
-        self.shape = self.movie.shape
-        self.camera_info = {}
-        self.camera_info['Baseline'] = 400 if baseline is None else baseline
-        self.camera_info['Sensitivity'] = 2.5 if sensivity is None else sensivity
-        self.camera_info['Gain'] = 1 if gain is None else gain
-        self.camera_info['qe'] = 0.82 if qe is None else qe
+        self.movie = None
+        self.locs = None
+        self.info = None
 
 
     def __getitem__(self, index):
-        return self.movie[index]
+        if isinstance(index, str):
+            # Handle single field access like movie['x']
+            return self.locs[index]
+        elif isinstance(index, (list, tuple)):
+            # Handle multiple field access like movie[['x', 'y']]
+            return self.locs[index]
+        else:
+            raise ValueError("Index must be a string or a list of strings for np.recarray")
 
+
+    def __getattr__(self, name):
+        # If the attribute name exists in locs, return the corresponding field
+        if name in self.locs.dtype.names:
+            return self.locs[name]
+        else:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+
+    # this function is modified from the localize function in
+    # picasso.localize and it exports the fitting quality as well
     def fit_spots_gpufit(self, spots):
         size = spots.shape[1]
         initial_parameters = initial_parameters_gpufit(spots, size)
@@ -61,14 +63,46 @@ class movie_class():
 
         return parameters
 
+    # this function selects  and modifies a part of codes frm picasso.main
+    def lq_gpu_fitting(self, min_net_gradient=400, box=5):
+        camera_info = {}
+        camera_info["Baseline"] = 400
+        camera_info["Sensitivity"] = 2.5
+        camera_info["Gain"] = 1
+        camera_info["qe"] = 0.82
 
-    def lq_gpu_fitting(self, min_net_gradient, box):
-        current, futures = identify_async(self.movie, min_net_gradient, box, None)
+        movie, info = load_movie(self.movie_path)
+        # handle the roi before feeding it into the picasso functions
+        if self.roi is not None:
+            movie = movie[:, self.roi[0]: self.roi[2], self.roi[1]: self.roi[3]]
+
+            info[0]['Width'] = self.roi[3] - self.roi[1]
+            info[0]['Height'] = self.roi[2] - self.roi[0]
+
+        # chnage the frame range if it is not None
+        if self.frame_range is not None:
+            if isinstance(self.frame_range, (list, tuple)):
+                movie = movie[self.frame_range[0]: self.frame_range[1], :, :]
+                info[0]['Frame'] = self.frame_range[1] - self.frame_range[0]
+
+            if isinstance(self.frame_range, int):
+                movie = movie[self.frame_range, :, :]
+                movie = movie[np.newaxis, :, :]
+                info[0]['Frame'] = 1
+
+            else:
+                raise ValueError("frame_range must be a list/tuple for a range or"
+                                 " an integer for a single frame")
+
+        self.movie = movie
+
+
+        current, futures = identify_async(movie, min_net_gradient, box, roi=None)
         ids = identifications_from_futures(futures)
 
-        spots = get_spots(self.movie, ids, box, self.camera_info)
+        spots = get_spots(movie, ids, box, camera_info)
         theta = self.fit_spots_gpufit(spots)
-        em = self.camera_info["Gain"] > 1
+        em = camera_info["Gain"] > 1
         locs = locs_from_fits_gpufit(ids, theta, box, em)
 
         localize_info = {
@@ -81,166 +115,155 @@ class movie_class():
             "Pixelsize": 117,
             "Fit method": 'lq-gpu'}
 
-        self.info.append(localize_info)
+        info.append(localize_info)
+        self.locs = locs
+        self.info = info
 
-        return locs
-
-    def correct_frame(idx, frame, drift):
-        aim_shift = (-drift[1], -drift[0])
-        return idx, scipy_shift(frame, aim_shift, mode='constant', cval=0, order=0)
+        return locs, info
 
 
-    def drift_correction(self, min_net_gradient, box, return_movie=False):
-        movie = self.movie
-        locs = self.lq_gpu_fitting(min_net_gradient, box)
-        corrected_locs, new_info, drift = aim(locs, self.info, segmentation=100, intersect_d=20 / 117, roi_r=60 / 117)
+    def drift_correction(self, segmentation=100, intersect_d=20 / 117, roi_r=60 / 117):
+        # parameter in the unit of pixels
+        if self.locs is None:
+            raise ValueError("Please identify locs form the movie first")
 
+        corrected_locs, new_info, drift = aim(self.locs, self.info,
+                                              segmentation=segmentation, intersect_d=intersect_d,
+                                              roi_r=roi_r)
         drift = drift.view(np.recarray)
 
+        self.locs = corrected_locs
+        self.info = new_info
 
-        if return_movie:
-            args = [(i, movie[i, :, :], drift[i]) for i in range(movie.shape[0])]
-            corrected_movie = np.zeros_like(movie)
-            corrected_movie[0, :, :] = movie[0, :, :]
-            with Pool() as pool:
-                for i, corrected_frame in pool.starmap(self.correct_frame, args):
-                    corrected_movie[i, :, :] = corrected_frame
-
-            return corrected_locs, corrected_movie
-
-        else:
-            return corrected_locs
-
-
-    def link_locs(self, min_net_gradient, box, r_max, max_dark_time):
-        locs = self.drift_correction(min_net_gradient, box, return_movie=False)
-        linked_locs = link(locs, self.info, r_max, max_dark_time)
-        return linked_locs
+        return drift
 
 
 
-def get_corrected_localizations(nuc_movie_path_list, locs_movie_path, pattern, save):
-    # --------------------- get drift corrected and linked locs from nuc movie ---------------------
-    nuc_locs = {}
-    nuc_firstFrame= {}
-    nuc_info = {}
-    for f in nuc_movie_path_list:
-        nuc_movie, info = load_movie(f)
+    def find_no_neighbour_mask(self, locs, box_radius):
+        points = np.column_stack((locs['x'], locs['y']))
 
-        height, width = nuc_movie.shape[1], nuc_movie.shape[2]
-        nuc_movie_class = movie_class(nuc_movie, info, roi=[0, height, width//2, width])  # get the red channel
-        #print(nuc_movie_class.shape)
-        # this link function will do the localization fitting and drift correction first
-        linked_locs = nuc_movie_class.link_locs(1000, 5, 1, 1)
-        #print('done linking')
-        # do filtering based on the consideration that one binding will last at least 5 frames
-        filtered_locs = linked_locs[linked_locs.len > 5]
+        # Find neighbors
+        nbrs = NearestNeighbors(radius=box_radius, algorithm='ball_tree').fit(points)
+        adjacency_matrix = nbrs.radius_neighbors_graph(points, mode='connectivity').toarray()
 
-        n = re.search(pattern, os.path.basename(f)).group(1)
-        nuc_firstFrame[n] = nuc_movie_class[0, :, :]
-        nuc_locs[n] = filtered_locs
-        nuc_info[n] = nuc_movie_class.info
+        # Keep only points with no close neighbors
+        keep_mask = adjacency_matrix.sum(axis=1) == 1
+
+        return keep_mask
 
 
 
-   # --------------------- align locs to localization movie ---------------------
-    ref, info = load_movie(locs_movie_path)
-    height, width = ref.shape[1], ref.shape[2]
-    ref_first_frame = ref[0, :, :width//2].copy()
+    def overlap_prevent(self, box_radius=2):
+        # ----------------- remove overlapping locs frame by frame -----------------
 
-    ref_movie_class = movie_class(ref, info, roi=[0, height, 0, width//2], frame_range=(0, 1))
-    ref_locs = ref_movie_class.lq_gpu_fitting(500, 5)
+        unique_frames = np.unique(self.locs['frame'])  # Get all unique frame IDs
+        filtered_locs = []  # Store results for all frames
+
+        for frame in unique_frames:
+            # Select points in the current frame
+            mask = self.locs['frame'] == frame
+            frame_locs = self.locs[mask]
+
+            if len(frame_locs) == 0:
+                continue  # Skip empty frames
+
+            keep_mask = self.find_no_neighbour_mask(frame_locs, box_radius)
+            filtered_locs.append(frame_locs[np.where(keep_mask)])
+
+        concatenated_locs = rfn.stack_arrays(filtered_locs, asrecarray=True)
+        self.locs = concatenated_locs.view(np.recarray)
+
+        return
+
+
+def neighbour_counting(ref_points, mov_points, nuc, box_radius=2):
+    ref_points = np.column_stack((ref_points['x'], ref_points['y']))
+    mov_points = np.column_stack((mov_points['x'], mov_points['y']))
+
+    nbrs = NearestNeighbors(radius=box_radius)
+    nbrs.fit(mov_points)
+
+    # Find neighbors for all reference points at once
+    indices = nbrs.radius_neighbors(ref_points, return_distance=False)
+
+    params = []
+    for i, (ref_point, neighbor_indices) in enumerate(zip(ref_points, indices)):
+        neighbor_count = len(mov_points[neighbor_indices]) if len(neighbor_indices) > 0 else 0
+        params.append([neighbor_count])
+
+    params = pd.DataFrame(params, columns=['{}'.format(nuc)])
+    params.index.name = 'ref_index'
+
+    return params
+
+
+
+
+def locs_based_analysis(movie_path_list, ref_movie_path, pattern, box_size=2,
+                        roi=None, ref_roi=None, save=True):
+
+    ''' This function corrects the position of the movies in the movie_path_list based on the reference movie
+    Then it calculates the overlap between the reference movie and the movies in the movie_path_list'''
+
+    # ------- prepare the reference locs -------
+    ref = MovieClass(ref_movie_path, ref_roi, frame_range=0)
+    ref.lq_gpu_fitting(box=5)
+    ref.overlap_prevent(box_radius=box_size)
+    _, ref_image = _render.render(ref.locs, ref.info)
+
     if save:
-        save_locs(os.path.dirname(locs_movie_path) + '/ref_locs.hdf5', ref_locs, ref_movie_class.info)
+        save_locs(ref_movie_path.replace('.tif', '.hdf5'), ref.locs, ref.info)
 
-    # align locs from nuc to localization movie
-    file_corrected_locs = []
-    sr = StackReg(StackReg.RIGID_BODY)
-    for nuc in nuc_locs.keys():
-        mov = nuc_firstFrame[nuc]
-        transform_mat = sr.register(ref_first_frame, mov)
-        #print(transform_mat)
+    nuc_locs = {}
+    for movie_path in movie_path_list:
+        # ----------------------- drift correction ----------
+        mov = MovieClass(movie_path, roi)
+        mov.lq_gpu_fitting(box=5)
+        mov.drift_correction()
+        mov.overlap_prevent(box_radius=box_size)
 
-        locs = nuc_locs[nuc]
-        pos = np.column_stack((locs.x, locs.y))
-        aligned_pos = np.dot(pos, transform_mat[:2, :2].T) + transform_mat[:2, 2]
-        #print(aligned_pos)
-        locs.x = aligned_pos[:, 0]
-        locs.y = aligned_pos[:, 1]
+        nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
+
+        # ----------------------- channel alignment ----------
+        _, mov_image = _render.render(mov.locs, mov.info)
+        shift_y, shift_x = rcc([ref_image, mov_image])
+        mov.locs.x -= shift_x[1]
+        mov.locs.y -= shift_y[1]
+        nuc_locs[nuc] = mov.locs[['x', 'y']].copy()
 
         if save:
-            save_locs(os.path.dirname(locs_movie_path) + '/{}_locs.hdf5'.format(nuc), locs, nuc_info[nuc])
+            save_locs(movie_path.replace('.tif', '.hdf5'), mov.locs, mov.info)
 
-        locs = pd.DataFrame.from_records(locs)
-        locs['nuc'] = nuc
-        file_corrected_locs.append(locs)
+    # ----------------------- neighbour counting ----------
+    ref_locs = ref.locs[['x', 'y']].copy()
+    total_params = []
+    for nuc in nuc_locs.keys():
+        param = neighbour_counting(ref_locs, nuc_locs[nuc], nuc)
+        total_params.append(param)
 
-    file_corrected_locs = pd.concat(file_corrected_locs)
-
-    return file_corrected_locs, pd.DataFrame.from_records(ref_locs)
-
-
-def outlier_detection(param):
-    param = param[['num', 'len', 'photons']].to_numpy()
-    total_activity = np.sum(param, axis=0)
-    scores = (total_activity - param) / total_activity
-    scores = scores.sum(axis=1)
-
-    temperature = 1.0
-    exp_scores = np.exp(scores / temperature)
-
-    softmax = exp_scores / np.sum(exp_scores)
-
-    outlier_index = np.argmax(softmax)
-    confidence = softmax[outlier_index]
-
-    return outlier_index, confidence
+    total_params = pd.concat(total_params, axis=1)
+    total_params.to_csv(os.path.dirname(ref_movie_path) + '/neighbour_counting.csv', index=False)
 
 
-def locs_based_analysis(ref_locs_movie, nuc_movie, pattern, max_dis=5, save=True):
-    # the input is either path of tif files or hdf5 files
-    if ref_locs_movie.endswith('.tif') and np.all([x.endswith('.tif') for x in nuc_movie]):
-        nuc_locs, ref_locs = get_corrected_localizations(nuc_movie, ref_locs_movie, pattern, save)
+    return
 
 
-    elif ref_locs_movie.endswith('.hdf5') and nuc_movie.endswith('.hdf5'):
-        nuc_locs = pd.read_hdf(nuc_movie, 'locs')
-        ref_locs = pd.read_hdf(ref_locs_movie, 'locs')
-
-    else:
-        raise ValueError('The input files should be either tif or hdf5 files')
-
-    detection_results = []
-    for idx, row in ref_locs.iterrows():
-        xc = row['x']
-        yc = row['y']
-        subset = nuc_locs[(nuc_locs.x - xc)**2 + (nuc_locs.y - yc)**2 < max_dis**2].copy()
-        ns, counts = np.unique(subset['nuc'], return_counts=True)
-        if len(ns) == 4 and np.all(counts > 2):
-            param = subset.groupby('nuc', sort=True).mean()
-            param['num'] = counts
-            outlier, confidence = outlier_detection(param)
-        else:
-            outlier, confidence = 4, 0
-
-        detection_results.append([xc, yc, outlier, confidence])
-
-    detection_results = pd.DataFrame(detection_results, columns=['x', 'y', 'outlier', 'confidence'])
-    detection_results['outlier'] = detection_results['outlier'].replace(
-        {0: 'A', 1: 'C', 2: 'G', 3: 'T', 4: 'No signal'})
-
-    save_path = os.path.dirname(ref_locs_movie) + '/detection_results.csv'
-    detection_results.to_csv(save_path, index=False)
-
-    print(detection_results.value_counts(subset=['outlier']))
-
-    return detection_results
 
 
-if __name__ == '__main__':
-    nuc_movs = ["H:\jagadish_data\locs_based_analysis\GAP_A_8nt_comp_df10_GAP_A_degen100nM_S3A300nM.tif",
-                "H:\jagadish_data\locs_based_analysis\GAP_A_8nt_comp_df10_GAP_A_degen100nM_S3C300nM.tif",
-                "H:\jagadish_data\locs_based_analysis\GAP_A_8nt_comp_df10_GAP_A_degen100nM_S3G300nM.tif",
-                "H:\jagadish_data\locs_based_analysis\GAP_A_8nt_comp_df10_GAP_A_degen100nM_S3T300nM-2.tif"]
-    locs_based_analysis("H:\jagadish_data\locs_based_analysis\GAP_A_8nt_comp_df10_GAP_A_Localization.tif",
-                        nuc_movie=nuc_movs, pattern='_S3(.+?)300nM')
+if __name__ == "__main__":
+    ref = "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_Localization.tif"
+    ref_roi = [0, 0, 684, 428]  # green channel # Note that two NIM have different width!!!!
+
+    mov_list = ["H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3T300nM.tif",
+                "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3G300nM.tif",
+                "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3C300nM.tif",
+                "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3A300nM.tif"]
+    roi = [0, 428, 684, 856]  # red channel
+
+    locs_based_analysis(mov_list, ref, pattern=r'S3([A-Z])300nM', roi=roi, ref_roi=ref_roi, save=True)
+
+
+
+
+
+
