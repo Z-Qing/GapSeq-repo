@@ -269,6 +269,11 @@ def io_trace_arrange_csv(file_path, pattern, max_length=np.inf):
     C_traces = {}
     G_traces = {}
 
+    # exclude traces that are a flat line
+    stds = np.std(all_traces.values, axis=0)
+    if np.any(stds == 0):
+        all_traces = all_traces.iloc[:, stds != 0]
+
     for id in all_traces.columns.get_level_values(0).unique():
         subset = all_traces[id]
         if len(subset.columns) == 4:
@@ -311,10 +316,9 @@ def io_trace_arrange_json(trace_path, pattern, max_length=np.inf):
         for item in one_movie_traces:
             if len(item) > 0:  # some traces are empty
                 trace = item['Acceptor']
-                if np.std(trace) == 0:
-                    continue
-                one_movie_traces_array.append(trace)
-                index_of_exist.append(id)
+                if np.std(trace) != 0:  # some traces are flat lines
+                    one_movie_traces_array.append(trace)
+                    index_of_exist.append(id)
             id += 1
 
         one_movie_traces_array = np.array(one_movie_traces_array)
