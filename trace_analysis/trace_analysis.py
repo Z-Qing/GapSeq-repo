@@ -17,7 +17,6 @@ class time_series():
         self.min = min(time_series)
         self.stage_params = None
         self.bkps = None
-        #self.smooth = None
 
 
     def __getitem__(self, index):
@@ -44,7 +43,7 @@ class time_series():
         return stage_params
 
 
-    def PELT_linear_analysis(self, penalty=500000, mini_size=10):
+    def PELT_linear_analysis(self, penalty=10, mini_size=10):
         algo = rpt.KernelCPD(kernel='linear', min_size=mini_size).fit(self.trace)
         bkps = algo.predict(pen=penalty)
         bkps.insert(0, 0)
@@ -55,9 +54,9 @@ class time_series():
 
 
     def denoise(self):
-        signal = savgol_filter(self.trace, 21, 3)
+        self.trace = savgol_filter(self.trace, 21, 3)
         #self.trace = np.convolve(signal, np.ones(20) / 20, mode='same')
-        self.smooth = signal
+
 
         return
 
@@ -73,10 +72,7 @@ class time_series():
 
 
     def PELT_gaussian_analysis(self, penalty=10, mini_size=10):
-        #if self.smooth is None:
         data = self.trace
-        # else:
-        #     data = self.smooth
 
         algo = rpt.KernelCPD(kernel="rbf", min_size=mini_size).fit(data)
 
@@ -122,7 +118,7 @@ class time_series():
         stage_params = self.stage_params.sort_values(by='start')
 
         stage_params['group'] = (
-                (stage_params['class'] != stage_params['class'].shift())
+                (stage_params['merge'] != stage_params['merge'].shift())
         ).cumsum()
 
         # Perform the aggregation to merge stages
@@ -131,6 +127,7 @@ class time_series():
             'start': 'min',
             'end': 'max',
             'class': 'first',
+            'merge': 'first',
         }).reset_index(drop=True)
 
         # Recalculate the real mean intensity using the original signal
@@ -145,30 +142,23 @@ class time_series():
         return
 
 
-    def binary_classify(self):
+    def binary_classify(self, max_unbinging_intensity=2000, intensity_threshold=3):
         if self.stage_params is None:
             raise ValueError("Please run a change point detection algorithm first.")
 
         if len(self.stage_params) == 1:
             self.stage_params['class'] = 0
+            self.stage_params['merge'] = 0
             return
-
-        # threshold = threshold_otsu(self.trace)
-        # std = min(self.trace[self.trace >= threshold].std(), self.trace[self.trace < threshold].std())
-        #
-        # threshold = threshold + 3 * std
-        # self.stage_params['class'] = (self.stage_params['intensity'] > threshold).astype(int)
-        #
-        # if np.all(self.stage_params['class'] == 1):
-        #     self.stage_params['class'] = 0
 
         std_list = []
         for i in range(1, len(self.stage_params)):
-            std = self.trace[int(self.stage_params['start'][i] + 1):int(self.stage_params['end'][i] - 1)].std()
+            std = self.trace[int(self.stage_params['start'][i] + 2):int(self.stage_params['end'][i] - 2)].std()
             std_list.append(std)
 
+        threshold = intensity_threshold * np.median(std_list)
         data = self.stage_params['intensity'].values.reshape(-1, 1)
-        cluster = AgglomerativeClustering(linkage='average', distance_threshold=2*np.mean(std_list),
+        cluster = AgglomerativeClustering(linkage='average', distance_threshold=threshold,
                                           n_clusters=None).fit(data)
         labels = cluster.labels_
 
@@ -180,40 +170,54 @@ class time_series():
         label_map = {old_label: new_label for new_label, old_label in enumerate(sorted_labels)}
         new_labels = np.array([label_map[lbl] for lbl in labels])
 
-        self.stage_params['class'] = (new_labels > 0).astype(int)
+
+        self.stage_params['merge'] = new_labels
+        self.stage_params['class'] = np.where(new_labels == 0, 0, 1)
+
+
+        #if len(np.unique(new_labels)) >= 3:
+        potential_base = self.stage_params[self.stage_params['merge'] == 0]
+        if np.sum(potential_base['end'] - potential_base['start']) < self.length * 0.02:
+            self.stage_params['merge'] = np.where(self.stage_params['merge'] <= 0, 0,
+                                                      self.stage_params['merge'] - 1)
+            self.stage_params['class'] = np.where(self.stage_params['merge'] == 0, 0, 1)
+
+
+        #consider situation that the trace is binding all the time
+        potential_base = self.stage_params[self.stage_params['merge'] == 0]
+        if np.mean(potential_base['intensity']) > max_unbinging_intensity:
+            self.stage_params['class'] = 1
+
 
         return
 
 
 
+def pick_outlier(binding_params):
+    #  ------------------- find outlier ----------------
+    binding_params = np.array(binding_params)
 
-def io_trace_arrange(file_path, pattern):
-    all_traces = pd.read_csv(file_path, skiprows=[2, 3], header=[0, 1])
-    A_traces = {}
-    T_traces = {}
-    C_traces = {}
-    G_traces = {}
+    # at least 3 traces have 3 binding events
+    if np.sum(binding_params[:, 0] >= 1) < 3:
+        outlier = 4
+        confidence = 0
 
-    for id in all_traces.columns.get_level_values(0).unique():
-        subset = all_traces[id]
-        if len(subset.columns) == 4:
-            for name in subset.columns:
-                nucleotide = re.search(pattern, name).group(1)
-                if nucleotide == 'A' or nucleotide == 'a':
-                    A_traces[id] = subset[name]
-                elif nucleotide == 'T' or nucleotide == 't':
-                    T_traces[id] = subset[name]
-                elif nucleotide == 'C' or nucleotide == 'c':
-                    C_traces[id] = subset[name]
-                elif nucleotide == 'G' or nucleotide == 'g':
-                    G_traces[id] = subset[name]
-                else:
-                    raise ValueError('did not match any nucleotide')
-
-    return A_traces, T_traces, C_traces, G_traces
+    else:
+        total_activity = np.sum(binding_params, axis=0)
+        scores = binding_params / total_activity
+        scores = np.mean(scores, axis=1)
+        outlier = np.argmin(scores)
 
 
-def pick_outlier(id, four_traces, penalty=10, mini_size=10, display=False):
+        sorted_scores = np.sort(scores)
+        sorted_scores = sorted_scores / sorted_scores[1]
+
+        confidence = (sorted_scores[1] - sorted_scores[0]) / sorted_scores[2:].mean()
+
+    return outlier, confidence
+
+
+def worker(id, four_traces, penalty=10, mini_size=10, display=False, intensity_threshold=3):
     if display:
         # Create a figure with 4 vertical subplots
         fig, axes = plt.subplots(4, 1, figsize=(10, 12))
@@ -227,8 +231,9 @@ def pick_outlier(id, four_traces, penalty=10, mini_size=10, display=False):
         series.PELT_gaussian_analysis(penalty=penalty, mini_size=mini_size)
         #series.PELT_linear_analysis(penalty=penalty, mini_size=mini_size)
         series.get_stage_params()
-        series.binary_classify()
+        series.binary_classify(intensity_threshold=intensity_threshold)
         series.merge_stage()
+
 
         binding = series.stage_params[series.stage_params['class'] == 1]
         num_binding = len(binding)
@@ -237,18 +242,6 @@ def pick_outlier(id, four_traces, penalty=10, mini_size=10, display=False):
         else:
             avg_duration = 0
 
-        # if num_binding > 2:
-        #     pos = (binding['start'] + binding['end']) / 2
-        #     count, bins_count = np.histogram(pos, bins=int(series.length / 10), range=(0, series.length))
-        #     pdf = count / sum(count)  # the PDF of the histogram using count values
-        #     cdf = np.cumsum(pdf)
-        #
-        #     ideal_CDF = [10 / series.length * i for i in np.arange(1, len(bins_count))]
-        #     even = 1 - np.sqrt(mean_squared_error(ideal_CDF, cdf))
-        #
-        # else:  # when binding event number is less than 3, consider the distribution is not even
-        #     even = 0.5
-
         binding_params.append([num_binding, avg_duration])
 
         if display:
@@ -256,76 +249,162 @@ def pick_outlier(id, four_traces, penalty=10, mini_size=10, display=False):
             ax = axes[i]
             series.plot(ax=ax)
 
-    #  ------------------- find outlier ----------------
-    binding_params = np.array(binding_params)
-    #binding_params = RobustScaler().fit_transform(binding_params)
+    # -------------- pick outlier ---------------
 
-    # at least 3 traces have 3 binding events
-    if np.sum(binding_params[:, 0] >= 3) < 3:
-        outlier = 4
-        confidence = 0
-
-    else:
-        total_activity = np.sum(binding_params, axis=0)
-        scores = binding_params / total_activity
-        scores = np.mean(scores, axis=1)
-        outlier = np.argmin(scores)
-
-        unit = np.sort(scores)[1]  # the second smallest score won't be 0
-        scores = scores / unit
-        avg_left = np.mean(np.delete(scores, outlier))
-
-        confidence = 1 - scores[outlier] / avg_left
+    if len(binding_params) == 4:
+        outlier, confidence = pick_outlier(binding_params)
 
     if display:
         axes[0].set_title('ID:{}  pick:{} confidence:{}'.format(id, outlier, np.round(confidence, 2)))
         plt.show()
 
+
     return id, outlier, confidence
 
 
-def GapSeq_analysis(trace_path, pattern, id_list=None, penalty=5, mini_size=5, display=False):
-    A_traces, T_traces, C_traces, G_traces = io_trace_arrange(trace_path, pattern)
+def io_trace_arrange_csv(file_path, pattern, max_length=np.inf):
+    all_traces = pd.read_csv(file_path, skiprows=[2, 3], header=[0, 1])
+    A_traces = {}
+    T_traces = {}
+    C_traces = {}
+    G_traces = {}
+
+    for id in all_traces.columns.get_level_values(0).unique():
+        subset = all_traces[id]
+        if len(subset.columns) == 4:
+            for name in subset.columns:
+                nucleotide = re.search(pattern, name).group(1)
+                trace = subset[name]
+                if len(trace) > max_length:
+                    trace = trace[:max_length]
+
+                if nucleotide == 'A' or nucleotide == 'a':
+                    A_traces[id] = trace
+                elif nucleotide == 'T' or nucleotide == 't':
+                    T_traces[id] = trace
+                elif nucleotide == 'C' or nucleotide == 'c':
+                    C_traces[id] = trace
+                elif nucleotide == 'G' or nucleotide == 'g':
+                    G_traces[id] = trace
+                else:
+                    raise ValueError('did not match any nucleotide')
+
+    return A_traces, T_traces, C_traces, G_traces
+
+
+
+def io_trace_arrange_json(trace_path, pattern, max_length=np.inf):
+    all_info = pd.read_json(trace_path)
+    all_traces = all_info['data']
+
+    nuc_traces = {}
+    index_of_exist = []
+    for i in range(4):
+        file_name = all_traces.index[i]
+        nuc = re.search(pattern, file_name).group(1)
+
+        # this is a list of dictionaries with keys 'picasso_loc' and 'Acceptor' and
+        # two only contains NaN values
+        one_movie_traces = all_traces.iloc[i]
+        one_movie_traces_array = []
+        id = 0
+        for item in one_movie_traces:
+            if len(item) > 0:  # some traces are empty
+                trace = item['Acceptor']
+                if np.std(trace) == 0:
+                    continue
+                one_movie_traces_array.append(trace)
+                index_of_exist.append(id)
+            id += 1
+
+        one_movie_traces_array = np.array(one_movie_traces_array)
+        if one_movie_traces_array.shape[1] > max_length:
+            one_movie_traces_array = one_movie_traces_array[:, :max_length]
+
+        nuc_traces[nuc] = one_movie_traces_array
+
+    # -------- only keep the traces that have signal in all 4 movies --------
+    inds, counts = np.unique(index_of_exist, return_counts=True)
+    index_to_keep = inds[counts == 4]
+
+    # keep the return values the same as the csv version
+    A_traces = {}
+    T_traces = {}
+    C_traces = {}
+    G_traces = {}
+    for i in index_to_keep:
+        A_traces[i] = nuc_traces['A'][i, :]
+        T_traces[i] = nuc_traces['T'][i, :]
+        C_traces[i] = nuc_traces['C'][i, :]
+        G_traces[i] = nuc_traces['G'][i, :]
+
+
+    return A_traces, T_traces, C_traces, G_traces
+
+
+# the intensity threshold is in the unit of median intensity std for all detected stages
+def GapSeq_analysis(trace_path, pattern, max_length=np.inf, id_list=None,
+                    penalty=5, mini_size=5, display=False, intensity_threshold=3):
+    if trace_path.endswith('.json'):
+        A_traces, T_traces, C_traces, G_traces = io_trace_arrange_json(trace_path, pattern, max_length)
+
+    elif trace_path.endswith('.csv'):
+        A_traces, T_traces, C_traces, G_traces = io_trace_arrange_csv(trace_path, pattern, max_length)
+    else:
+        raise ValueError('file type not supported')
 
     if id_list is None:
         ids = A_traces.keys()
     else:
         ids = id_list
 
-    args = [(id, (A_traces[id], T_traces[id], C_traces[id], G_traces[id]), penalty, mini_size, display)
+    args = [(id, (A_traces[id], T_traces[id], C_traces[id], G_traces[id]),
+             penalty, mini_size, display, intensity_threshold)
             for id in ids]
 
     if not display:
         detection_results = []
         with multiprocessing.Pool() as pool:
-            for id, outlier, confidence in pool.starmap(pick_outlier, args):
+            for id, outlier, confidence in pool.starmap(worker, args):
                 detection_results.append([id, outlier, confidence])
 
         detection_results = pd.DataFrame(detection_results, columns=['id', 'outlier', 'confidence'])
         detection_results['outlier'] = detection_results['outlier'].replace(
             {0: 'A', 1: 'T', 2: 'C', 3: 'G', 4: 'No signal'})
-        detection_results.to_csv(trace_path.replace('.csv', '_detection_results.csv'), index=False)
+
+        if trace_path.endswith('.json'):
+            detection_results.to_csv(trace_path.replace('.json', '_detection_results.csv'), index=False)
+        else:
+            detection_results.to_csv(trace_path.replace('.csv', '_detection_results.csv'), index=False)
 
         print(detection_results.value_counts(subset=['outlier']))
 
     else:
         #np.random.shuffle(args)
         for arg in args:
-            pick_outlier(*arg)
+            worker(*arg)
 
 
     return
 
 
 
-if __name__ == '__main__':
-    params = pd.read_csv("H:\jagadish_data\GAP_A_8nt_comp_df10_GAP_A_Localization_gapseq_detection_results.csv")
-    params = params[params['confidence'] > 0.8]
-    params = params[params['outlier'] != 'T']
-    ids = params['id'].astype(str).to_list()
 
-    GapSeq_analysis("H:\jagadish_data\GAP_A_8nt_comp_df10_GAP_A_Localization_gapseq.csv",
-                    pattern=r'S3([A-Z])300nM', display=True, penalty=2, mini_size=10, id_list=ids)
+
+if __name__ == '__main__':
+    GapSeq_analysis("H:/jagadish_data/20240518_3ntSeq_pos5_dex15form15_degen0.5uMcomp1uM/corrected_movies/"
+                          "3ntSeq_pos5_dex15form15_degen0.5uMcomp1uM_seal5A_1uM_degen0.5uM_corrected_BG.json",
+                    pattern=r'seal5([A-Z])_1uM', display=False, intensity_threshold=3, penalty=2, mini_size=5)
+
+#     params = pd.read_csv("H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq_detection_results.csv")
+#     params = params[params['outlier'] != 'No signal']
+#     params = params[params['confidence'] > 0.6]
+#     print(len(params))
+#     params = params[params['outlier'] != 'G']
+#     ids = params['id'].astype(str).to_list()
+#
+#     GapSeq_analysis("H:/jagadish_data/3 base/base recognition/position 7/GA_seq_comp_13nt_7thpos_interrogation_GAp13nt_L532Exp200_gapseq.csv",
+#                     pattern=r'_s7([A-Z])_', display=True, penalty=2, mini_size=5, intensity_threshold=2, id_list=ids)
 
 
 
