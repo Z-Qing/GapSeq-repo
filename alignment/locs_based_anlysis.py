@@ -2,7 +2,7 @@ import numpy as np
 from numpy.lib import recfunctions as rfn
 import pandas as pd
 from picasso.gausslq import locs_from_fits_gpufit, fit_spots_gpufit, fit_spots_parallel, locs_from_fits
-from picasso.io import load_movie, save_locs
+from picasso.io import load_movie, save_locs, load_locs
 from picasso.localize import identify_async, identifications_from_futures, get_spots
 from picasso.aim import aim
 from picasso.imageprocess import rcc
@@ -61,12 +61,12 @@ class MovieClass(object):
         if self.frame_range is not None:
             if isinstance(self.frame_range, (list, tuple)):
                 movie = movie[self.frame_range[0]: self.frame_range[1], :, :]
-                info[0]['Frame'] = self.frame_range[1] - self.frame_range[0]
+                info[0]['Frames'] = self.frame_range[1] - self.frame_range[0]
 
             if isinstance(self.frame_range, int):
                 movie = movie[self.frame_range, :, :]
                 movie = movie[np.newaxis, :, :]
-                info[0]['Frame'] = 1
+                info[0]['Frames'] = 1
 
             else:
                 raise ValueError("frame_range must be a list/tuple for a range or"
@@ -100,6 +100,7 @@ class MovieClass(object):
         info.append(localize_info)
         self.locs = locs
         self.info = info
+        self.movie = movie
 
         return locs, info
 
@@ -129,6 +130,7 @@ class MovieClass(object):
 
         self.locs = locs
         self.info = info
+        self.movie = movie
 
         return
 
@@ -266,6 +268,33 @@ def locs_based_analysis(movie_path_list, ref_movie_path, pattern, box_size=2, gp
 
 
 
+def locs_based_analysis_preAligned(ref_locs_path, mov_list, pattern, box_size=2, roi=None, save=True):
+    ref_locs, _ = load_locs(ref_locs_path)
+
+
+    nuc_locs = {}
+    for movie_path in mov_list:
+        mov = MovieClass(movie_path, roi)
+        mov.lq_gpu_fitting(box=5)
+        mov.drift_correction()
+        mov.overlap_prevent(box_radius=box_size)
+
+        nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
+        nuc_locs[nuc] = mov.locs[['x', 'y']].copy()
+
+        if save:
+            save_locs(movie_path.replace('.tif', '.hdf5'), mov.locs, mov.info)
+
+    # ----------------------- neighbour counting ----------------------
+    total_params = []
+    for nuc in nuc_locs.keys():
+        param = neighbour_counting(ref_locs, nuc_locs[nuc], nuc)
+        total_params.append(param)
+
+    return
+
+
+
 
 if __name__ == "__main__":
     ref = "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_Localization.tif"
@@ -279,9 +308,3 @@ if __name__ == "__main__":
 
     locs_based_analysis(mov_list, ref, pattern=r'S3([A-Z])300nM', roi=roi, ref_roi=ref_roi,
                         save=True, gpu=True)
-
-
-
-
-
-
