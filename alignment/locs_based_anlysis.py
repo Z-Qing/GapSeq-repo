@@ -140,13 +140,16 @@ class MovieClass(object):
         if self.locs is None:
             raise ValueError("Please identify locs form the movie first")
 
-        corrected_locs, new_info, drift = aim(self.locs, self.info,
-                                              segmentation=segmentation, intersect_d=intersect_d,
-                                              roi_r=roi_r)
-        drift = drift.view(np.recarray)
+        if self.locs['frame'].max() < 3 * segmentation:
+            raise Warning("The movie is too short for drift correction")
+        else:
+            corrected_locs, new_info, drift = aim(self.locs, self.info,
+                                                  segmentation=segmentation, intersect_d=intersect_d,
+                                                  roi_r=roi_r)
+            drift = drift.view(np.recarray)
 
-        self.locs = corrected_locs
-        self.info = new_info
+            self.locs = corrected_locs
+            self.info = new_info
 
         return drift
 
@@ -268,14 +271,18 @@ def locs_based_analysis(movie_path_list, ref_movie_path, pattern, box_size=2, gp
 
 
 
-def locs_based_analysis_preAligned(ref_locs_path, mov_list, pattern, box_size=2, roi=None, save=True):
+def locs_based_analysis_preAligned(ref_locs_path, mov_list, pattern, box_size=2, gpu=True,
+                                   roi=None, save=False):
     ref_locs, _ = load_locs(ref_locs_path)
 
 
     nuc_locs = {}
     for movie_path in mov_list:
         mov = MovieClass(movie_path, roi)
-        mov.lq_gpu_fitting(box=5)
+        if gpu:
+            mov.lq_gpu_fitting(box=5)
+        else:
+            mov.lq_cpu_fitting(box=5)
         mov.drift_correction()
         mov.overlap_prevent(box_radius=box_size)
 
@@ -291,20 +298,46 @@ def locs_based_analysis_preAligned(ref_locs_path, mov_list, pattern, box_size=2,
         param = neighbour_counting(ref_locs, nuc_locs[nuc], nuc)
         total_params.append(param)
 
+    total_params = pd.concat(total_params, axis=1)
+
+    return total_params
+
+
+def sort_files(dir_path):
+    files = os.listdir(dir_path)
+    ref = [x for x in files if x.endswith('.hdf5')]
+    if len(ref) != 1:
+        raise ValueError("There should be only one reference file in the directory")
+    else:
+        ref = os.path.join(dir_path, ref[0])
+
+    subfolder_pattern = {}
+    subfolder_pattern['4D5X'] = r'_S4D5([A-Z])300nM_'
+    subfolder_pattern['4X5D'] = r'_S4([A-Z])5D300nM_'
+
+    for folder, pattern in subfolder_pattern.items():
+        mov_list = os.listdir(os.path.join(dir_path, folder))
+        mov_list = [os.path.join(dir_path, folder, x) for x in mov_list if x.endswith('.tif')]
+
+        counts = locs_based_analysis_preAligned(ref, mov_list=mov_list, pattern=pattern, box_size=2, gpu=True,
+                                       roi=[0, 428, 684, 856], save=False)
+
+        counts.to_csv(os.path.join(dir_path, folder) + '/neighbour_counting.csv', index=False)
+
     return
 
 
-
-
 if __name__ == "__main__":
-    ref = "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_Localization.tif"
-    ref_roi = [0, 0, 684, 428]  # green channel # Note that two NIMs have different width!!!!
+    sort_files("Y:/Qing_2/corrected_IPE_trans_movies/20250222_IPE_trans_NTP200_degenAtto647Nexp7")
 
-    mov_list = ["H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3T300nM.tif",
-                "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3G300nM.tif",
-                "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3C300nM.tif",
-                "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3A300nM.tif"]
-    roi = [0, 428, 684, 856]  # red channel
-
-    locs_based_analysis(mov_list, ref, pattern=r'S3([A-Z])300nM', roi=roi, ref_roi=ref_roi,
-                        save=True, gpu=True)
+    # ref = "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_Localization.tif"
+    # ref_roi = [0, 0, 684, 428]  # green channel # Note that two NIMs have different width!!!!
+    #
+    # mov_list = ["H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3T300nM.tif",
+    #             "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3G300nM.tif",
+    #             "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3C300nM.tif",
+    #             "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3A300nM.tif"]
+    # roi = [0, 428, 684, 856]  # red channel
+    #
+    # locs_based_analysis(mov_list, ref, pattern=r'S3([A-Z])300nM', roi=roi, ref_roi=ref_roi,
+    #                     save=True, gpu=True)
