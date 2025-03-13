@@ -5,11 +5,11 @@ from picasso.gausslq import locs_from_fits_gpufit, fit_spots_gpufit, fit_spots_p
 from picasso.io import load_movie, save_locs, load_locs
 from picasso.localize import identify_async, identifications_from_futures, get_spots
 from picasso.aim import aim
-from picasso.imageprocess import rcc
-import picasso.render as _render
 import re
 import os
-from sklearn.neighbors import NearestNeighbors
+#from sklearn.neighbors import NearestNeighbors
+from scipy.spatial import KDTree
+
 
 
 class MovieClass(object):
@@ -135,37 +135,19 @@ class MovieClass(object):
         return
 
 
-    def drift_correction(self, segmentation=100, intersect_d=20 / 117, roi_r=60 / 117):
-        # parameter in the unit of pixels
-        if self.locs is None:
-            raise ValueError("Please identify locs form the movie first")
-
-        if self.locs['frame'].max() < 3 * segmentation:
-            raise Warning("The movie is too short for drift correction")
-        else:
-            corrected_locs, new_info, drift = aim(self.locs, self.info,
-                                                  segmentation=segmentation, intersect_d=intersect_d,
-                                                  roi_r=roi_r)
-            drift = drift.view(np.recarray)
-
-            self.locs = corrected_locs
-            self.info = new_info
-
-        return drift
-
-
     def find_no_neighbour_mask(self, locs, box_radius):
         points = np.column_stack((locs['x'], locs['y']))
 
-        # Find neighbors
-        nbrs = NearestNeighbors(radius=box_radius, algorithm='ball_tree').fit(points)
-        adjacency_matrix = nbrs.radius_neighbors_graph(points, mode='connectivity').toarray()
+        # Build KDTree for fast neighbor lookup
+        tree = KDTree(points)
 
-        # Keep only points with no close neighbors
-        keep_mask = adjacency_matrix.sum(axis=1) == 1
+        # Find neighbors within the given radius
+        indices = tree.query_ball_point(points, box_radius)
+
+        # Keep only points with no close neighbors (excluding self)
+        keep_mask = np.array([len(neigh) == 1 for neigh in indices])
 
         return keep_mask
-
 
     def overlap_prevent(self, box_radius=2):
         # ----------------- remove overlapping locs frame by frame -----------------
@@ -182,7 +164,7 @@ class MovieClass(object):
                 continue  # Skip empty frames
 
             keep_mask = self.find_no_neighbour_mask(frame_locs, box_radius)
-            filtered_locs.append(frame_locs[np.where(keep_mask)])
+            filtered_locs.append(frame_locs[keep_mask])
 
         concatenated_locs = rfn.stack_arrays(filtered_locs, asrecarray=True)
         self.locs = concatenated_locs.view(np.recarray)
@@ -191,87 +173,28 @@ class MovieClass(object):
 
 
 def neighbour_counting(ref_points, mov_points, nuc, box_radius=2):
-    ref_points = np.column_stack((ref_points['x'], ref_points['y']))
-    mov_points = np.column_stack((mov_points['x'], mov_points['y']))
+    # Extract x, y coordinates
+    ref_coords = np.column_stack((ref_points['x'], ref_points['y']))
+    mov_coords = np.column_stack((mov_points['x'], mov_points['y']))
 
-    nbrs = NearestNeighbors(radius=box_radius)
-    nbrs.fit(mov_points)
+    # Build KDTree for fast neighbor lookup
+    tree = KDTree(mov_coords)
 
-    # Find neighbors for all reference points at once
-    indices = nbrs.radius_neighbors(ref_points, return_distance=False)
+    # Query neighbors within the given radius
+    indices = tree.query_ball_point(ref_coords, box_radius)
 
-    params = []
-    for i, (ref_point, neighbor_indices) in enumerate(zip(ref_points, indices)):
-        neighbor_count = len(mov_points[neighbor_indices]) if len(neighbor_indices) > 0 else 0
-        params.append([neighbor_count])
+    # Count neighbors for each reference point
+    neighbor_counts = [len(neigh) for neigh in indices]
 
-    params = pd.DataFrame(params, columns=['{}'.format(nuc)])
+    # Convert to DataFrame
+    params = pd.DataFrame({nuc: neighbor_counts})
     params.index.name = 'ref_index'
 
     return params
 
 
 
-
-def locs_based_analysis(movie_path_list, ref_movie_path, pattern, box_size=2, gpu=True,
-                        roi=None, ref_roi=None, save=True):
-
-    ''' This function corrects the position of the movies in the movie_path_list based on the reference movie
-    Then it calculates the overlap between the reference movie and the movies in the movie_path_list'''
-
-    # ------- prepare the reference locs -------
-    ref = MovieClass(ref_movie_path, ref_roi, frame_range=0)
-    if gpu:
-        ref.lq_gpu_fitting(box=5)
-    else:
-        ref.lq_cpu_fitting(box=5)
-
-    ref.overlap_prevent(box_radius=box_size)
-    _, ref_image = _render.render(ref.locs, ref.info)
-
-    if save:
-        save_locs(ref_movie_path.replace('.tif', '.hdf5'), ref.locs, ref.info)
-
-    nuc_locs = {}
-    for movie_path in movie_path_list:
-        # ----------------------- drift correction ----------
-        mov = MovieClass(movie_path, roi)
-        if gpu:
-            mov.lq_gpu_fitting(box=5)
-        else:
-            mov.lq_gpu_fitting(box=5)
-
-        mov.drift_correction()
-        mov.overlap_prevent(box_radius=box_size)
-
-        nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
-
-        # ----------------------- channel alignment ----------
-        _, mov_image = _render.render(mov.locs, mov.info)
-        shift_y, shift_x = rcc([ref_image, mov_image])
-        mov.locs.x -= shift_x[1]
-        mov.locs.y -= shift_y[1]
-        nuc_locs[nuc] = mov.locs[['x', 'y']].copy()
-
-        if save:
-            save_locs(movie_path.replace('.tif', '.hdf5'), mov.locs, mov.info)
-
-    # ----------------------- neighbour counting ----------------------
-    ref_locs = ref.locs[['x', 'y']].copy()
-    total_params = []
-    for nuc in nuc_locs.keys():
-        param = neighbour_counting(ref_locs, nuc_locs[nuc], nuc)
-        total_params.append(param)
-
-    total_params = pd.concat(total_params, axis=1)
-    total_params.to_csv(os.path.dirname(ref_movie_path) + '/neighbour_counting.csv', index=False)
-
-
-    return
-
-
-
-def locs_based_analysis_preAligned(ref_locs_path, mov_list, pattern, box_size=2, gpu=True,
+def locs_based_analysis_preAligned(ref_locs_path, mov_list, pattern, box_size=2, gradient=1500, gpu=True,
                                    roi=None, save=False):
     ref_locs, _ = load_locs(ref_locs_path)
 
@@ -280,10 +203,9 @@ def locs_based_analysis_preAligned(ref_locs_path, mov_list, pattern, box_size=2,
     for movie_path in mov_list:
         mov = MovieClass(movie_path, roi)
         if gpu:
-            mov.lq_gpu_fitting(box=5)
+            mov.lq_gpu_fitting(box=5, min_net_gradient=gradient)
         else:
-            mov.lq_cpu_fitting(box=5)
-        mov.drift_correction()
+            mov.lq_cpu_fitting(box=5, min_net_gradient=gradient)
         mov.overlap_prevent(box_radius=box_size)
 
         nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
@@ -307,13 +229,13 @@ def sort_files(dir_path):
     files = os.listdir(dir_path)
     ref = [x for x in files if x.endswith('.hdf5')]
     if len(ref) != 1:
-        raise ValueError("There should be only one reference file in the directory")
+        raise ValueError("There should be one and only one reference file in the directory")
     else:
         ref = os.path.join(dir_path, ref[0])
 
     subfolder_pattern = {}
-    subfolder_pattern['4D5X'] = r'_S4D5([A-Z])300nM_'
-    subfolder_pattern['4X5D'] = r'_S4([A-Z])5D300nM_'
+    subfolder_pattern['4D5X'] = r'_S4D5([A-Z])300nM'
+    subfolder_pattern['4X5D'] = r'_S4([A-Z])5D300nM'
 
     for folder, pattern in subfolder_pattern.items():
         mov_list = os.listdir(os.path.join(dir_path, folder))
@@ -322,13 +244,13 @@ def sort_files(dir_path):
         counts = locs_based_analysis_preAligned(ref, mov_list=mov_list, pattern=pattern, box_size=2, gpu=True,
                                        roi=[0, 428, 684, 856], save=False)
 
-        counts.to_csv(os.path.join(dir_path, folder) + '/neighbour_counting.csv', index=False)
+        counts.to_csv(os.path.join(dir_path, folder) + '/neighbour_counting.csv', index=True)
 
     return
 
 
 if __name__ == "__main__":
-    sort_files("Y:/Qing_2/corrected_IPE_trans_movies/20250222_IPE_trans_NTP200_degenAtto647Nexp7")
+    sort_files("H:/jagadish_data/20250308_IPE_trans_NTP200Exp15")
 
     # ref = "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_Localization.tif"
     # ref_roi = [0, 0, 684, 428]  # green channel # Note that two NIMs have different width!!!!
