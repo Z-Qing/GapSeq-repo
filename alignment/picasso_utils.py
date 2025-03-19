@@ -1,18 +1,20 @@
-import numpy as np
-from numpy.lib import recfunctions as rfn
-import pandas as pd
 from picasso.gausslq import locs_from_fits_gpufit, fit_spots_gpufit, fit_spots_parallel, locs_from_fits
-from picasso.io import load_movie, save_locs, load_locs
+from picasso.io import load_movie
 from picasso.localize import identify_async, identifications_from_futures, get_spots
 from picasso.aim import aim
-import re
-import os
-#from sklearn.neighbors import NearestNeighbors
+from picasso.clusterer import dbscan
+from picasso.postprocess import link
+import cupy as cp
+from cupyx.scipy.ndimage import shift as cupy_shift
+from cupyx.scipy.ndimage import median_filter
 from scipy.spatial import KDTree
+from scipy.ndimage import shift
+import numpy as np
+from numpy.lib import recfunctions as rfn
 
 
 
-class MovieClass(object):
+class one_channel_movie(object):
     def __init__(self, movie_path, roi=None, frame_range=None):
         self.movie_path = movie_path
         self.roi = roi
@@ -22,26 +24,11 @@ class MovieClass(object):
         self.locs = None
         self.info = None
 
-
     def __getitem__(self, index):
-        if isinstance(index, str):
-            # Handle single field access like movie['x']
-            return self.locs[index]
-        elif isinstance(index, (list, tuple)):
-            # Handle multiple field access like movie[['x', 'y']]
-            return self.locs[index]
-        else:
-            raise ValueError("Index must be a string or a list of strings for np.recarray")
+        return self.movie[index]
 
-
-    def __getattr__(self, name):
-        # If the attribute name exists in locs, return the corresponding field
-        if name in self.locs.dtype.names:
-            return self.locs[name]
-        else:
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
-
-
+    # this function is modified from the localize function in picasso.localize
+    # and it exports the fitting quality as well
     def io_movie_format(self):
         camera_info = {}
         camera_info["Baseline"] = 400
@@ -74,9 +61,8 @@ class MovieClass(object):
 
         return movie, camera_info, info
 
-
     # this function selects  and modifies a part of codes frm picasso.main
-    def lq_gpu_fitting(self, min_net_gradient=400, box=5):
+    def lq_gpu_fitting(self, min_net_gradient=400, box=5, base=400):
         movie, camera_info, info = self.io_movie_format()
 
         current, futures = identify_async(movie, min_net_gradient, box, roi=None)
@@ -102,9 +88,7 @@ class MovieClass(object):
         self.info = info
         self.movie = movie
 
-        return locs, info
-
-
+        return
 
     def lq_cpu_fitting(self, min_net_gradient=400, box=5):
         movie, camera_info, info = self.io_movie_format()
@@ -134,6 +118,73 @@ class MovieClass(object):
 
         return
 
+    def lq_fitting(self, GPU, min_net_gradient=400, box=5):
+        if GPU:
+            self.lq_gpu_fitting(min_net_gradient, box)
+        else:
+            self.lq_cpu_fitting(min_net_gradient, box)
+
+    def drift_correction(self, GPU=True, segmentation=100, intersect_d=20 / 117, roi_r=60 / 117):
+        # self.lq_gpu_fitting(min_net_gradient=min_net_gradient, box=box)
+        # the movie will be set during the lq_gpu_fitting
+        if self.locs is None:
+            raise ValueError("Please identify locs form the movie first")
+
+        if max(self.locs['frame']) >= 3 * segmentation:
+            corrected_locs, new_info, drift = aim(self.locs, self.info,
+                                                  segmentation=segmentation, intersect_d=intersect_d, roi_r=roi_r)
+            drift = drift.view(np.recarray)
+
+            if GPU:
+                # apply negative drift frame by frame using GPU
+                movie_gpu = cp.asarray(self.movie)
+                corrected_movie_gpu = cp.empty_like(movie_gpu)
+                for i in range(movie_gpu.shape[0]):
+                    aim_shift = (-drift[i][1], -drift[i][0])
+                    corrected_movie_gpu[i] = cupy_shift(movie_gpu[i], aim_shift, mode='constant', cval=0, order=0)
+
+                corrected_movie = cp.asnumpy(corrected_movie_gpu)
+
+            else:
+                corrected_movie = np.empty_like(self.movie)
+                for i in range(self.movie.shape[0]):
+                    aim_shift = (-drift[i][1], -drift[i][0])
+                    corrected_movie[i] = shift(self.movie[i], aim_shift, mode='constant', cval=0, order=0)
+
+            self.movie = corrected_movie
+            self.locs = corrected_locs
+            self.info = new_info
+
+        else:
+            raise Warning('short movie with less than {} frames, no drift correction applied'.format(3 * segmentation))
+
+        return
+
+    def dbscan(self, eps=0.5, min_samples=20):
+        if self.locs is None:
+            raise ValueError('Please run localization function first')
+
+        clusters = dbscan(self.locs, radius=eps, min_samples=min_samples)
+
+        self.locs = clusters
+
+        return
+
+    def link(self, r_max=1, max_dark_time=1):
+        if self.locs is None:
+            raise ValueError('Please run localization function first')
+
+        linked_locs = link(self.locs, self.info, r_max=r_max, max_dark_time=max_dark_time)
+
+        self.locs = linked_locs
+
+        return
+
+
+    def median_bg_filtering(self, radius=20):
+
+
+        return
 
     def find_no_neighbour_mask(self, locs, box_radius):
         points = np.column_stack((locs['x'], locs['y']))
@@ -171,95 +222,3 @@ class MovieClass(object):
 
         return
 
-
-def neighbour_counting(ref_points, mov_points, nuc, box_radius=2):
-    # Extract x, y coordinates
-    ref_coords = np.column_stack((ref_points['x'], ref_points['y']))
-    mov_coords = np.column_stack((mov_points['x'], mov_points['y']))
-
-    # Build KDTree for fast neighbor lookup
-    tree = KDTree(mov_coords)
-
-    # Query neighbors within the given radius
-    indices = tree.query_ball_point(ref_coords, box_radius)
-
-    # Count neighbors for each reference point
-    neighbor_counts = [len(neigh) for neigh in indices]
-
-    # Convert to DataFrame
-    params = pd.DataFrame({nuc: neighbor_counts})
-    params.index.name = 'ref_index'
-
-    return params
-
-
-
-def locs_based_analysis_preAligned(ref_locs_path, mov_list, pattern, box_size=2, gradient=1500, gpu=True,
-                                   roi=None, save=False):
-    ref_locs, _ = load_locs(ref_locs_path)
-
-
-    nuc_locs = {}
-    for movie_path in mov_list:
-        mov = MovieClass(movie_path, roi)
-        if gpu:
-            mov.lq_gpu_fitting(box=5, min_net_gradient=gradient)
-        else:
-            mov.lq_cpu_fitting(box=5, min_net_gradient=gradient)
-        mov.overlap_prevent(box_radius=box_size)
-
-        nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
-        nuc_locs[nuc] = mov.locs[['x', 'y']].copy()
-
-        if save:
-            save_locs(movie_path.replace('.tif', '.hdf5'), mov.locs, mov.info)
-
-    # ----------------------- neighbour counting ----------------------
-    total_params = []
-    for nuc in nuc_locs.keys():
-        param = neighbour_counting(ref_locs, nuc_locs[nuc], nuc)
-        total_params.append(param)
-
-    total_params = pd.concat(total_params, axis=1)
-
-    return total_params
-
-
-def sort_files(dir_path):
-    files = os.listdir(dir_path)
-    ref = [x for x in files if x.endswith('.hdf5')]
-    if len(ref) != 1:
-        raise ValueError("There should be one and only one reference file in the directory")
-    else:
-        ref = os.path.join(dir_path, ref[0])
-
-    subfolder_pattern = {}
-    subfolder_pattern['4D5X'] = r'_S4D5([A-Z])300nM'
-    subfolder_pattern['4X5D'] = r'_S4([A-Z])5D300nM'
-
-    for folder, pattern in subfolder_pattern.items():
-        mov_list = os.listdir(os.path.join(dir_path, folder))
-        mov_list = [os.path.join(dir_path, folder, x) for x in mov_list if x.endswith('.tif')]
-
-        counts = locs_based_analysis_preAligned(ref, mov_list=mov_list, pattern=pattern, box_size=2, gpu=True,
-                                       roi=[0, 428, 684, 856], save=False)
-
-        counts.to_csv(os.path.join(dir_path, folder) + '/neighbour_counting.csv', index=True)
-
-    return
-
-
-if __name__ == "__main__":
-    sort_files("H:/jagadish_data/20250308_IPE_trans_NTP200Exp15")
-
-    # ref = "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_Localization.tif"
-    # ref_roi = [0, 0, 684, 428]  # green channel # Note that two NIMs have different width!!!!
-    #
-    # mov_list = ["H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3T300nM.tif",
-    #             "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3G300nM.tif",
-    #             "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3C300nM.tif",
-    #             "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3A300nM.tif"]
-    # roi = [0, 428, 684, 856]  # red channel
-    #
-    # locs_based_analysis(mov_list, ref, pattern=r'S3([A-Z])300nM', roi=roi, ref_roi=ref_roi,
-    #                     save=True, gpu=True)
