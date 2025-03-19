@@ -40,10 +40,6 @@ def prepare_two_channel_movie(movie_path, gradient_1=400, gradient_2=400, box_1=
         channel_1.drift_correction(gpu)
         channel_2.drift_correction(gpu)
 
-    # channel_1.link()
-    # channel_2.link()
-
-
     return channel_1, channel_2
 
 
