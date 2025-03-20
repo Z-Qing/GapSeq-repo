@@ -8,7 +8,6 @@ from picasso_utils import one_channel_movie
 
 
 
-
 def neighbour_counting(ref_points, mov_points, nuc, box_radius=2):
     # Extract x, y coordinates
     ref_coords = np.column_stack((ref_points['x'], ref_points['y']))
@@ -34,10 +33,10 @@ def neighbour_counting(ref_points, mov_points, nuc, box_radius=2):
 def locs_based_analysis_preAligned(ref_path, mov_list, pattern, box_size=2, mov_gradient=1500,
                                    gpu=True, ref_roi=None, ref_gradient=400,
                                    roi=None, save_hdf5=False):
-    if ref_path.endswith('hdf5'):
+    if ref_path.endswith('.hdf5'):
         ref_locs, _ = load_locs(ref_path)
 
-    elif ref_path.endswith('tif'):
+    elif ref_path.endswith('.tif'):
         ref = one_channel_movie(ref_path, roi=ref_roi, frame_range=0)
         ref.lq_fitting(GPU=gpu, min_net_gradient=ref_gradient, box=5)
         ref.overlap_prevent(box_radius=box_size)
@@ -68,9 +67,9 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, box_size=2, mov_
     return total_params
 
 
-def sort_file_localization_movie(dir_path, pattern):
+def process_analysis_Localization(dir_path, pattern):
     files = [x for x in os.listdir(dir_path) if x.endswith('.tif')]
-    ref = [x for x in files if 'Localization' in x]
+    ref = [x for x in files if 'Localization' in x or 'localization' in x]
     if len(ref) != 1:
         raise ValueError("There should be one and only one reference file in the directory")
     else:
@@ -82,14 +81,14 @@ def sort_file_localization_movie(dir_path, pattern):
 
     counts = locs_based_analysis_preAligned(ref, mov_list, pattern=pattern, box_size=2, gpu=True,
                                             roi=[0, 428, 684, 856], ref_roi=[0, 0, 684, 428],
-                                            ref_gradient=400, save_hdf5=False)
+                                            ref_gradient=400, mov_gradient=1000, save_hdf5=False)
     counts.to_csv(dir_path + '/neighbour_counting.csv')
 
 
     return
 
 
-def sort_files_picked_locs(dir_path):
+def process_analysis_ALEX(dir_path):
     files = os.listdir(dir_path)
     ref = [x for x in files if x.endswith('.hdf5')]
     if len(ref) != 1:
@@ -114,16 +113,6 @@ def sort_files_picked_locs(dir_path):
 
 
 if __name__ == "__main__":
-    sort_files_picked_locs("H:/jagadish_data/20250308_IPE_trans_NTP200Exp15")
-
-    # ref = "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_Localization.tif"
-    # ref_roi = [0, 0, 684, 428]  # green channel # Note that two NIMs have different width!!!!
-    #
-    # mov_list = ["H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3T300nM.tif",
-    #             "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3G300nM.tif",
-    #             "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3C300nM.tif",
-    #             "H:\jagadish_data\Gap_T_8nt\GAP_T_8nt_comp_df10_GAP_T_degen100nM_S3A300nM.tif"]
-    # roi = [0, 428, 684, 856]  # red channel
-    #
-    # locs_based_analysis(mov_list, ref, pattern=r'S3([A-Z])300nM', roi=roi, ref_roi=ref_roi,
-    #                     save=True, gpu=True)
+    #process_analysis_ALEX("H:/jagadish_data/20250308_IPE_trans_NTP200Exp15")
+    process_analysis_Localization('G:/20250319_8nt_NComp_GAP_A_Seal100nM/corrected_movies',
+                                  pattern=r'_seal3([A-Z])_100nM')
