@@ -6,7 +6,7 @@ from picasso.clusterer import dbscan
 from picasso.postprocess import link
 import cupy as cp
 from cupyx.scipy.ndimage import shift as cupy_shift
-from cupyx.scipy.ndimage import median_filter
+from cupyx.scipy.ndimage import median_filter, gaussian_filter
 from scipy.spatial import KDTree
 from scipy.ndimage import shift
 import numpy as np
@@ -19,6 +19,7 @@ class one_channel_movie(object):
         self.movie_path = movie_path
         self.roi = roi
         self.frame_range = frame_range
+        self.camera_info = {}
 
         self.movie = None
         self.locs = None
@@ -30,13 +31,13 @@ class one_channel_movie(object):
     # this function is modified from the localize function in picasso.localize
     # and it exports the fitting quality as well
     def io_movie_format(self):
-        camera_info = {}
-        camera_info["Baseline"] = 400
-        camera_info["Sensitivity"] = 2.5
-        camera_info["Gain"] = 1
-        camera_info["qe"] = 0.82
-
         movie, info = load_movie(self.movie_path)
+
+        self.camera_info["Baseline"] = 400
+        self.camera_info["Sensitivity"] = 2.5
+        self.camera_info["Gain"] = 1
+        self.camera_info["qe"] = 0.82
+
         # handle the roi before feeding it into the picasso functions
         if self.roi is not None:
             movie = movie[:, self.roi[0]: self.roi[2], self.roi[1]: self.roi[3]]
@@ -59,16 +60,22 @@ class one_channel_movie(object):
                 raise ValueError("frame_range must be a list/tuple for a range or"
                                  " an integer for a single frame")
 
-        return movie, camera_info, info
+        self.movie = movie
+        self.info = info
+
+        return
+
+
 
     # this function selects  and modifies a part of codes frm picasso.main
-    def lq_gpu_fitting(self, min_net_gradient=400, box=5, base=400):
-        movie, camera_info, info = self.io_movie_format()
+    def lq_gpu_fitting(self, min_net_gradient=400, box=5):
+        self.io_movie_format()
+        camera_info = self.camera_info
 
-        current, futures = identify_async(movie, min_net_gradient, box, roi=None)
+        current, futures = identify_async(self.movie, min_net_gradient, box, roi=None)
         ids = identifications_from_futures(futures)
 
-        spots = get_spots(movie, ids, box, camera_info)
+        spots = get_spots(self.movie, ids, box, camera_info)
         theta = fit_spots_gpufit(spots)
         em = camera_info["Gain"] > 1
         locs = locs_from_fits_gpufit(ids, theta, box, em)
@@ -83,20 +90,19 @@ class one_channel_movie(object):
             "Pixelsize": 117,
             "Fit method": 'lq-gpu'}
 
-        info.append(localize_info)
+        self.info.append(localize_info)
         self.locs = locs
-        self.info = info
-        self.movie = movie
 
         return
 
     def lq_cpu_fitting(self, min_net_gradient=400, box=5):
-        movie, camera_info, info = self.io_movie_format()
+        self.io_movie_format()
+        camera_info = self.camera_info
 
-        current, futures = identify_async(movie, min_net_gradient, box, roi=None)
+        current, futures = identify_async(self.movie, min_net_gradient, box, roi=None)
         ids = identifications_from_futures(futures)
 
-        spots = get_spots(movie, ids, box, camera_info)
+        spots = get_spots(self.movie, ids, box, camera_info)
         theta = fit_spots_parallel(spots)
         locs = locs_from_fits(ids, theta, box, camera_info["Gain"])
 
@@ -110,11 +116,8 @@ class one_channel_movie(object):
             "Pixelsize": 117,
             "Fit method": 'lq'}
 
-        info.append(localize_info)
-
+        self.info.append(localize_info)
         self.locs = locs
-        self.info = info
-        self.movie = movie
 
         return
 
@@ -123,6 +126,7 @@ class one_channel_movie(object):
             self.lq_gpu_fitting(min_net_gradient, box)
         else:
             self.lq_cpu_fitting(min_net_gradient, box)
+
 
     def drift_correction(self, GPU=True, segmentation=100, intersect_d=20 / 117, roi_r=60 / 117):
         # self.lq_gpu_fitting(min_net_gradient=min_net_gradient, box=box)
@@ -156,7 +160,7 @@ class one_channel_movie(object):
             self.info = new_info
 
         else:
-            raise Warning('short movie with less than {} frames, no drift correction applied'.format(3 * segmentation))
+            pass
 
         return
 
@@ -181,10 +185,29 @@ class one_channel_movie(object):
         return
 
 
-    def median_bg_filtering(self, radius=20):
+    def median_filter(self, radius=20):
+        image_stack = cp.asarray(self.movie)
+        bg = median_filter(image_stack, size=(1, radius, radius))
+        base = np.round(np.median(bg))
+        filtered_stack = image_stack - bg
 
+        self.movie = cp.asnumpy(filtered_stack)
+        self.camera_info['Baseline'] = base
 
         return
+
+
+    def gaussian_filter(self, sigam=10):
+        image_stack = cp.asarray(self.movie)
+        bg = gaussian_filter(image_stack, sigma=(1, sigam, sigam))
+        base = np.round(np.median(bg))
+        filtered_stack = image_stack - bg
+
+        self.movie = cp.asnumpy(filtered_stack)
+        self.camera_info['Baseline'] = base
+
+        return
+
 
     def find_no_neighbour_mask(self, locs, box_radius):
         points = np.column_stack((locs['x'], locs['y']))
