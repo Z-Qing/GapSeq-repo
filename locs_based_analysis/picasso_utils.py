@@ -69,7 +69,6 @@ class one_channel_movie(object):
 
     # this function selects  and modifies a part of codes frm picasso.main
     def lq_gpu_fitting(self, min_net_gradient=400, box=5):
-        self.io_movie_format()
         camera_info = self.camera_info
 
         current, futures = identify_async(self.movie, min_net_gradient, box, roi=None)
@@ -96,7 +95,6 @@ class one_channel_movie(object):
         return
 
     def lq_cpu_fitting(self, min_net_gradient=400, box=5):
-        self.io_movie_format()
         camera_info = self.camera_info
 
         current, futures = identify_async(self.movie, min_net_gradient, box, roi=None)
@@ -122,6 +120,9 @@ class one_channel_movie(object):
         return
 
     def lq_fitting(self, GPU, min_net_gradient=400, box=5):
+        if self.movie == None or self.info ==None:
+            self.io_movie_format()
+
         if GPU:
             self.lq_gpu_fitting(min_net_gradient, box)
         else:

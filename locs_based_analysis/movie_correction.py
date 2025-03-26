@@ -7,20 +7,28 @@ from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 from pystackreg import StackReg
 from pystackreg.util import to_uint16
-from scipy.ndimage import shift
 from picasso_utils import one_channel_movie
 
 
-def prepare_two_channel_movie(movie_path, gradient_1=400, get_locs=False,
-                              gradient_2=400, box_1=5, box_2=5, gpu=True, bg_filtering=None):
+def channel_separate(movie_path):
     movie = imread(movie_path)
     h, w = movie.shape[1], movie.shape[2]
 
-    rio_1 = [0, 0, h, w//2]
-    rio_2 = [0, w//2, h, w]
+    rio_1 = [0, 0, h, w // 2]
+    rio_2 = [0, w // 2, h, w]
 
     channel_1 = one_channel_movie(movie_path, roi=rio_1)
     channel_2 = one_channel_movie(movie_path, roi=rio_2)
+
+    channel_1.io_movie_format()
+    channel_2.io_movie_format()
+
+    return channel_1, channel_2
+
+def prepare_two_channel_movie(movie_path, gradient_1=400, drift_correction=True,
+                              gradient_2=400, box_1=5, box_2=5, gpu=True, bg_filtering=None):
+
+    channel_1, channel_2 = channel_separate(movie_path)
 
     if bg_filtering == 'gaussian':
         channel_1.gaussian_filter()
@@ -33,16 +41,13 @@ def prepare_two_channel_movie(movie_path, gradient_1=400, get_locs=False,
         pass
 
 
-    if get_locs:
+    if drift_correction:
         channel_1.lq_fitting(GPU=gpu, min_net_gradient=gradient_1, box=box_1)
         channel_2.lq_fitting(GPU=gpu, min_net_gradient=gradient_2, box=box_2)
 
         channel_1.drift_correction(gpu)
         channel_2.drift_correction(gpu)
 
-    else:
-        channel_1.io_movie_format()
-        channel_2.io_movie_format()
 
     return channel_1, channel_2
 
@@ -70,17 +75,17 @@ def process_frame_chunk(frame_chunk, transform_mat, sr):
     return results
 
 
-def stackreg_channel_alignment(mov, ref=None, transfer_matrix=None, num_processes=None):
+def stackreg_channel_alignment(mov, transfer_matrix, num_processes=None):
     """
     Align all frames in `mov` using hybrid parallelism.
     """
     sr = StackReg(StackReg.RIGID_BODY)
 
-    if transfer_matrix is None:
-        mov_image = mov[0, :, :]
-        transform_mat = sr.register(ref, mov_image)
-    else:
-        transform_mat = transfer_matrix
+    #if transfer_matrix is None:
+    # mov_image = mov[0, :, :]
+    # transform_mat = sr.register(ref, mov_image)
+    # else:
+    transform_mat = transfer_matrix
 
     # Split the frames into chunks for multiprocessing
     num_frames = mov.shape[0]
@@ -107,93 +112,93 @@ def stackreg_channel_alignment(mov, ref=None, transfer_matrix=None, num_processe
 
 
 
-def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True, alignment_method='RCC',
+def contrast_enhance(image, gamma = 1.5):
+    if len(image.shape) == 3:
+        image = image[0, :, :]
+
+    min_img = np.min(image)
+    max_img = np.max(image)
+    image = (image - min_img) * (255.0 / (max_img - min_img))
+
+    image = (np.power(image / 255.0, gamma) * 255.0).astype(np.uint16)
+
+    return image
+
+
+def align_red_green(movie_path, alignment_source, gpu=True):
+    if alignment_source == 'super-resolution':
+        channel_1, channel_2 = prepare_two_channel_movie(movie_path, gpu=gpu, drift_correction=True)
+        _, image_1 = _render.render(channel_1.locs, channel_1.info)
+        _, image_2 = _render.render(channel_2.locs, channel_2.info)
+
+    elif alignment_source == 'first':
+        channel_1, channel_2 = prepare_two_channel_movie(movie_path, gpu=gpu, drift_correction=False)
+        image_1 = contrast_enhance(channel_1.movie)
+        image_2 = contrast_enhance(channel_2.movie)
+
+    else:
+        raise ValueError('the image used to calculate red to green transformation matrix is either'
+                         'constructed super-resolution images or the first frame from movies')
+
+    sr = StackReg(StackReg.RIGID_BODY)
+    red_to_green_transform_mat = sr.register(image_1, image_2)
+
+    aligned_channel_2_movie = stackreg_channel_alignment(mov=channel_2.movie,
+                                                             transfer_matrix=red_to_green_transform_mat)
+
+    aligned_ref = np.concatenate((channel_1.movie, aligned_channel_2_movie), axis=2)
+
+    return aligned_ref, red_to_green_transform_mat
+
+
+
+
+
+def two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_mat, gpu):
+
+    green, red = prepare_two_channel_movie(movie_path, gpu=gpu, gradient_1=5000, gradient_2=400,
+                                           box_1=5, box_2=5, drift_correction=True)
+    green_image = green.movie[0, :, :]
+
+    # align red to green
+    red_aligned_movie = stackreg_channel_alignment(mov=red.movie, transfer_matrix=red_to_green_transform_mat)
+
+    # align green to green_ref
+    sr = StackReg(StackReg.RIGID_BODY)
+    green_to_green_ref_mat = sr.register(green_ref_image, green_image)
+    green_aligned_movie = stackreg_channel_alignment(mov=green.movie, transfer_matrix=green_to_green_ref_mat)
+
+    # align red to green_ref
+    red_aligned_movie = stackreg_channel_alignment(mov=red_aligned_movie, transfer_matrix=green_to_green_ref_mat)
+
+    # concat two channels
+    aligned_movie = np.concatenate((green_aligned_movie, red_aligned_movie), axis=2)
+
+    return aligned_movie
+
+
+def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True,
                                  alignment_source='super-resolution'):
     ''' This function do locs_based_analysis between different green channels using fiducial markers.
     And the fiducial markers can be detected easily in green channel but not red channel.
     The locs in green and red channels of transcription movie should be co-localized. Thus,
     the transformation matrix between green and red channel are acquired from there. '''
 
-    # create image for channel locs_based_analysis
-    if alignment_source == 'super-resolution':
-        channel_1, channel_2 = prepare_two_channel_movie(ref_movie_path, gpu=gpu, get_locs=True)
-        _, image_1 = _render.render(channel_1.locs, channel_1.info)
-        _, image_2 = _render.render(channel_2.locs, channel_2.info)
-
-    elif alignment_source == 'first':
-        channel_1, channel_2 = prepare_two_channel_movie(ref_movie_path, gpu=gpu, get_locs=False)
-        image_1 = channel_1.movie[0, :, :]
-        image_2 = channel_2.movie[0, :, :]
-
-        image_1 = (image_1 - np.min(image_1)) * (255.0 / (np.max(image_1) - np.min(image_1)))
-        image_2 = (image_2 - np.min(image_2)) * (255.0 / (np.max(image_2) - np.min(image_2)))
-
-        gamma = 1.5
-        image_1 = (np.power(image_1 / 255.0, gamma) * 255.0).astype(np.uint16)
-        image_2 = (np.power(image_2 / 255.0, gamma) * 255.0).astype(np.uint16)
-
-
-    else:
-        raise ValueError('the image used to calculate red to green transformation matrix is either'
-                         'constructed super-resolution images or the first frame from movies')
-
-    if alignment_method == 'RCC':
-        shift_y, shift_x = rcc([image_1, image_2])
-        red_to_green_transform_mat = (0, -shift_y[1], -shift_x[1])
-        aligned_channel_2_movie = shift(channel_2.movie, red_to_green_transform_mat, mode='constant', cval=0, order=0)
-
-    elif alignment_method == 'StackReg':
-        sr = StackReg(StackReg.RIGID_BODY)
-        red_to_green_transform_mat = sr.register(image_1, image_2)
-        print(red_to_green_transform_mat)
-        aligned_channel_2_movie = stackreg_channel_alignment(mov=channel_2.movie, transfer_matrix=red_to_green_transform_mat)
-
-    # Note the types of red_to_green_transform_mat are different with two method
-    else:
-        raise ValueError('channel_align_method is either RCC or StackReg')
-
-    aligned_ref = np.concatenate((channel_1.movie, aligned_channel_2_movie), axis=2)
-
+    aligned_ref, red_to_green_transform_mat = align_red_green(ref_movie_path, alignment_source=alignment_source,
+                                                              gpu=gpu)
+    print(red_to_green_transform_mat)
     imwrite(ref_movie_path.replace('.tif', '_corrected.tif'), aligned_ref)
 
     # use the first frame of the reference movie as the reference image
     # the fiducial markers will stand out in the green channel
+    channel_1, channel_2 = channel_separate(ref_movie_path)
     green_ref_image = channel_1.movie[0, :, :]
 
-    # identify locs belonging to fiducial markers
+
     for movie_path in movie_path_list:
-        green, red = prepare_two_channel_movie(movie_path, gpu=gpu, gradient_1=5000, gradient_2=400,
-                                               box_1=5, box_2=5, get_locs=True)
-        green_image = green.movie[0, :, :]
-
-        if alignment_method == 'RCC':
-            # align red to green
-            red_aligned_movie = shift(red.movie, red_to_green_transform_mat, mode='constant', cval=0, order=0)
-
-            # align green to green_ref
-            shift_y, shift_x = rcc([green_ref_image, green_image])
-            green_to_green_ref_mat = (0, -shift_y[1], -shift_x[1])
-            green_aligned_movie = shift(green.movie, green_to_green_ref_mat, mode='constant', cval=0, order=0)
-
-            # align red to green_ref
-            red_aligned_movie = shift(red_aligned_movie, green_to_green_ref_mat, mode='constant', cval=0, order=0)
-
-        else:
-            # align red to green
-            red_aligned_movie = stackreg_channel_alignment(mov=red.movie, transfer_matrix=red_to_green_transform_mat)
-
-            # align green to green_ref
-            sr = StackReg(StackReg.RIGID_BODY)
-            green_to_green_ref_mat = sr.register(green_ref_image, green_image)
-            green_aligned_movie = stackreg_channel_alignment(mov=green.movie, transfer_matrix=green_to_green_ref_mat)
-
-            # align red to green_ref
-            red_aligned_movie = stackreg_channel_alignment(mov=red_aligned_movie, transfer_matrix=green_to_green_ref_mat)
-
-        # concat two channels
-        aligned_movie = np.concatenate((green_aligned_movie, red_aligned_movie), axis=2)
-
+        aligned_movie = two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_mat, gpu)
         imwrite(movie_path.replace('.tif', '_corrected.tif'), aligned_movie)
+
 
     return
 
@@ -208,12 +213,11 @@ def process_correction_Localization(dir_path):
         raise ValueError("There should be one and only one reference file in the directory")
 
     files.remove(ref[0])
-    ref = os.path.join(dir_path, ref[0])
+    ref_movie_path = os.path.join(dir_path, ref[0])
 
-    mov_list = [os.path.join(dir_path, x) for x in files]
+    movie_path_list = [os.path.join(dir_path, x) for x in files]
 
-    position_correction_fiducial(mov_list, ref, alignment_source='first', gpu=True, alignment_method='StackReg')
-
+    position_correction_fiducial(movie_path_list, ref_movie_path, alignment_source='first')
 
     return
 
@@ -232,21 +236,38 @@ def process_correction_ALEX(dir_path):
     trans_mov = dir_path + '/' + trans_mov
     file_list = [dir_path + '/' + x for x in file_list]
 
-    position_correction_fiducial(file_list, trans_mov, gpu=True, alignment_method='StackReg',
-                                 alignment_source='super-resolution')
+    position_correction_fiducial(file_list, trans_mov, gpu=True, alignment_source='super-resolution')
 
     return
 
 
+
+def process_correction_photobleaching(dir_path, gpu=True):
+    files = [x for x in os.listdir(dir_path) if x.endswith('.tif')]
+    localization_path = [x for x in files if 'Localization' in x or 'localization' in x]
+
+    mov_path = [x for x in files if x not in localization_path]
+
+    localization_path = [os.path.join(dir_path, x) for x in localization_path]
+    mov_path = [os.path.join(dir_path, x) for x in mov_path]
+
+    # -------------------get red to green transformation matrix------------------
+    # the first movie (no phot0-bleaching) should have the strongest signal
+    ref_path = min(localization_path, key=os.path.getmtime)
+
+    # align the result of localization movie and gap movies in thee same way
+    localization_path.remove(ref_path)
+    mov_path.extend(localization_path)
+
+
+    position_correction_fiducial(mov_path, ref_path, alignment_source='first', gpu=gpu)
+
+    return
+
+
+
 if __name__ == "__main__":
-    # ref_roi = [0, 0, 684, 420]  # green channel # Note that two NIM have different width
-    # roi = [0, 428, 684, 856]  # red channel
-
-    process_correction_Localization("H:/competitive/20250325_8nt_comp_GAP_C")
-
-
-
-
-
+    #process_correction_Localization("H:/competitive/20250325_8nt_comp_GAP_C")
+    process_correction_photobleaching('H:/photobleaching/20250322_8nt_NComp_photobleaching2')
 
 
