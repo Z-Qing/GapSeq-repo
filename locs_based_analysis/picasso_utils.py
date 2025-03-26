@@ -188,11 +188,11 @@ class one_channel_movie(object):
     def median_filter(self, radius=20):
         image_stack = cp.asarray(self.movie)
         bg = median_filter(image_stack, size=(1, radius, radius))
-        base = np.round(np.median(bg))
         filtered_stack = image_stack - bg
+        filtered_stack = np.where(filtered_stack > 0, filtered_stack, 0)
 
         self.movie = cp.asnumpy(filtered_stack)
-        self.camera_info['Baseline'] = base
+        self.camera_info['Baseline'] = 10
 
         return
 
@@ -200,11 +200,11 @@ class one_channel_movie(object):
     def gaussian_filter(self, sigam=10):
         image_stack = cp.asarray(self.movie)
         bg = gaussian_filter(image_stack, sigma=(1, sigam, sigam))
-        base = np.round(np.median(bg))
         filtered_stack = image_stack - bg
+        filtered_stack = np.where(filtered_stack > 0, filtered_stack, 0)
 
         self.movie = cp.asnumpy(filtered_stack)
-        self.camera_info['Baseline'] = base
+        self.camera_info['Baseline'] = 10  # temp value
 
         return
 

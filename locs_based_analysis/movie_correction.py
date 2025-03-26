@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 import numpy as np
 from picasso.imageprocess import rcc
 import picasso.render as _render
@@ -113,7 +114,7 @@ def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True, alig
     The locs in green and red channels of transcription movie should be co-localized. Thus,
     the transformation matrix between green and red channel are acquired from there. '''
 
-    # create image for channel locs_based_analysi
+    # create image for channel locs_based_analysis
     if alignment_source == 'super-resolution':
         channel_1, channel_2 = prepare_two_channel_movie(ref_movie_path, gpu=gpu, get_locs=True)
         _, image_1 = _render.render(channel_1.locs, channel_1.info)
@@ -123,8 +124,14 @@ def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True, alig
         channel_1, channel_2 = prepare_two_channel_movie(ref_movie_path, gpu=gpu, get_locs=False)
         image_1 = channel_1.movie[0, :, :]
         image_2 = channel_2.movie[0, :, :]
+
         image_1 = (image_1 - np.min(image_1)) * (255.0 / (np.max(image_1) - np.min(image_1)))
         image_2 = (image_2 - np.min(image_2)) * (255.0 / (np.max(image_2) - np.min(image_2)))
+
+        gamma = 1.5
+        image_1 = (np.power(image_1 / 255.0, gamma) * 255.0).astype(np.uint16)
+        image_2 = (np.power(image_2 / 255.0, gamma) * 255.0).astype(np.uint16)
+
 
     else:
         raise ValueError('the image used to calculate red to green transformation matrix is either'
@@ -147,7 +154,6 @@ def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True, alig
 
     aligned_ref = np.concatenate((channel_1.movie, aligned_channel_2_movie), axis=2)
 
-    #if save_movie:
     imwrite(ref_movie_path.replace('.tif', '_corrected.tif'), aligned_ref)
 
     # use the first frame of the reference movie as the reference image
@@ -187,7 +193,6 @@ def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True, alig
         # concat two channels
         aligned_movie = np.concatenate((green_aligned_movie, red_aligned_movie), axis=2)
 
-        #if save_movie:
         imwrite(movie_path.replace('.tif', '_corrected.tif'), aligned_movie)
 
     return
@@ -237,7 +242,7 @@ if __name__ == "__main__":
     # ref_roi = [0, 0, 684, 420]  # green channel # Note that two NIM have different width
     # roi = [0, 428, 684, 856]  # red channel
 
-    process_correction_Localization('G:/20250319_8nt_NComp_GAP_A_Seal100nM/movies')
+    process_correction_Localization("H:/competitive/20250325_8nt_comp_GAP_C")
 
 
 

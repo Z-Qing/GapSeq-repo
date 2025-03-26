@@ -8,7 +8,7 @@ from picasso_utils import one_channel_movie
 
 
 
-def neighbour_counting(ref_points, mov_points, nuc, box_radius=2):
+def neighbour_counting(ref_points, mov_points, nuc, box_radius=1.5):
     # Extract x, y coordinates
     ref_coords = np.column_stack((ref_points['x'], ref_points['y']))
     mov_coords = np.column_stack((mov_points['x'], mov_points['y']))
@@ -30,7 +30,7 @@ def neighbour_counting(ref_points, mov_points, nuc, box_radius=2):
 
 
 
-def locs_based_analysis_preAligned(ref_path, mov_list, pattern, box_size=2, mov_gradient=1500,
+def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=1.5, mov_gradient=1500,
                                    gpu=True, ref_roi=None, ref_gradient=400,
                                    roi=None, save_hdf5=False):
     if ref_path.endswith('.hdf5'):
@@ -39,8 +39,9 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, box_size=2, mov_
     elif ref_path.endswith('.tif'):
         ref = one_channel_movie(ref_path, roi=ref_roi, frame_range=0)
         ref.lq_fitting(GPU=gpu, min_net_gradient=ref_gradient, box=5)
-        ref.overlap_prevent(box_radius=box_size)
+        ref.overlap_prevent(box_radius=search_radius*2)
         ref_locs = ref.locs
+        save_locs(ref_path.replace('.tif', '_.hdf5'), ref_locs, ref.info)
     else:
         raise ValueError('un-supported format')
 
@@ -48,7 +49,7 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, box_size=2, mov_
     for movie_path in mov_list:
         mov = one_channel_movie(movie_path, roi=roi)
         mov.lq_fitting(gpu, min_net_gradient=mov_gradient, box=5)
-        mov.overlap_prevent(box_radius=box_size)
+        #mov.overlap_prevent(box_radius=search_radius)
 
         nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
         nuc_locs[nuc] = mov.locs[['x', 'y']].copy()
@@ -59,7 +60,7 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, box_size=2, mov_
     # ----------------------- neighbour counting ----------------------
     total_params = []
     for nuc in nuc_locs.keys():
-        param = neighbour_counting(ref_locs, nuc_locs[nuc], nuc)
+        param = neighbour_counting(ref_locs, nuc_locs[nuc], nuc, box_radius=search_radius)
         total_params.append(param)
 
     total_params = pd.concat(total_params, axis=1)
@@ -79,7 +80,7 @@ def process_analysis_Localization(dir_path, pattern):
 
     mov_list = [os.path.join(dir_path, x) for x in files]
 
-    counts = locs_based_analysis_preAligned(ref, mov_list, pattern=pattern, box_size=2, gpu=True,
+    counts = locs_based_analysis_preAligned(ref, mov_list, pattern=pattern, search_radius=1.5, gpu=True,
                                             roi=[0, 428, 684, 856], ref_roi=[0, 0, 684, 428],
                                             ref_gradient=400, mov_gradient=1000, save_hdf5=False)
     counts.to_csv(dir_path + '/neighbour_counting.csv')
@@ -104,15 +105,15 @@ def process_analysis_ALEX(dir_path):
         mov_list = os.listdir(os.path.join(dir_path, folder))
         mov_list = [os.path.join(dir_path, folder, x) for x in mov_list if x.endswith('.tif')]
 
-        counts = locs_based_analysis_preAligned(ref, mov_list=mov_list, pattern=pattern, box_size=2, gpu=True,
+        counts = locs_based_analysis_preAligned(ref, mov_list=mov_list, pattern=pattern, search_radius=1.5, gpu=True,
                                        roi=[0, 428, 684, 856], save_hdf5=False, mov_gradient=1500)
 
-        counts.to_csv(os.path.join(dir_path, folder) + '/neighbour_counting.csv', index=True)
+        counts.to_csv(os.path.join(dir_path, folder) + '/neighbour_counting.csv')
 
     return
 
 
 if __name__ == "__main__":
     #process_analysis_ALEX("H:/jagadish_data/20250308_IPE_trans_NTP200Exp15")
-    process_analysis_Localization('G:/20250319_8nt_NComp_GAP_A_Seal100nM/corrected_movies',
-                                  pattern=r'_seal3([A-Z])_100nM')
+    process_analysis_Localization('H:/competitive/20250325_8nt_comp_GAP_C/corrected_movies',
+                                  pattern=r'_S3([A-Z])_200nM')
