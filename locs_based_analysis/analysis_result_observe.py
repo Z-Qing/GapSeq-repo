@@ -5,6 +5,7 @@ import pandas as pd
 from picasso_utils import one_channel_movie
 from picasso.io import save_locs, load_locs
 from scipy.spatial import KDTree
+import matplotlib.pyplot as plt
 
 
 
@@ -99,10 +100,44 @@ def export_locs_picasso(ref_hdf5_path, index, movie_list, gpu=True, box_size=1.5
 
 
 
-dir_path = 'H:/non_competitive/20250320_8nt_NComp_GAP_A_Seal100nM'
-hdf5_path = "H:/non_competitive/20250320_8nt_NComp_GAP_A_Seal100nM\8nt_NComp_GAP_A_Seal100nM_GAP_A_localization-1_corrected_boxsize5.hdf5"
+# dir_path = 'H:/competitive/20250325_8nt_comp_GAP_C'
+# hdf5_path = "H:/competitive/20250325_8nt_comp_GAP_C/8nt_comp_GAP_C_GAP_C_localization_corrected_.hdf5"
+#
+# movie_list = [os.path.join(dir_path, x) for x in os.listdir(dir_path) if x.endswith('.tif')]
+# movie_list = [x for x in movie_list if 'localization' not in x and 'Localization' not in x]
+#
+# export_locs_picasso(ref_hdf5_path=hdf5_path, index=[389, 1173, 1360, 1940, 1644, 121], movie_list=movie_list, box_size=1.5)
 
-movie_list = [os.path.join(dir_path, x) for x in os.listdir(dir_path) if x.endswith('.tif')]
-movie_list = [x for x in movie_list if 'localization' not in x and 'Localization' not in x]
 
-export_locs_picasso(ref_hdf5_path=hdf5_path, index=[175, 450, 606, 744, 852, 1096], movie_list=movie_list, box_size=1.5)
+def counts_filtering(path, minimum_high_counts=200, maximum_high_counts=1000):
+    counts = pd.read_csv(path, index_col=0)
+    b1 = counts.max(axis=1) > minimum_high_counts
+    filtered_counts = counts.loc[b1.values, :]
+
+    b2 = filtered_counts.sum(axis=1) < maximum_high_counts
+    filtered_counts = filtered_counts.loc[b2.values, :]
+
+    largest = filtered_counts.max(axis=1)
+    second_largest = filtered_counts.apply(lambda row: row.nlargest(2).iloc[-1], axis=1)
+    # b3 = second_largest < minimum_high_counts / 2
+    # filtered_counts = filtered_counts.loc[b3.values, :]
+
+
+    ratio = largest/second_largest
+    b3 = ratio > 2
+    filtered_counts = filtered_counts.loc[b3.values, :]
+    # #
+    selected_nuc = filtered_counts.idxmax(axis=1)
+    #
+    print(selected_nuc.value_counts())
+    #
+    print(filtered_counts[selected_nuc != 'G'])
+
+    # plt.hist(ratio, bins=np.arange(1, np.max(ratio), 0.5))
+    # plt.show()
+
+    return
+
+
+counts_filtering("H:/photobleaching/20250322_8nt_NComp_photobleaching2/"
+                 "8nt_NComp_photobleaching2_Gap_C_localization_corrected_neighbour_counting.csv")
