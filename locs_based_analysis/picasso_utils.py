@@ -120,7 +120,7 @@ class one_channel_movie(object):
         return
 
     def lq_fitting(self, GPU, min_net_gradient=400, box=5):
-        if self.movie == None or self.info ==None:
+        if self.movie is None or self.info is None:
             self.io_movie_format()
 
         if GPU:

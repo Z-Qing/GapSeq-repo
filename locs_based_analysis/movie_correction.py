@@ -1,13 +1,23 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from picasso.imageprocess import rcc
 import picasso.render as _render
 from tifffile import imwrite, imread
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 from pystackreg import StackReg
-from pystackreg.util import to_uint16
 from picasso_utils import one_channel_movie
+from scipy.ndimage import gaussian_filter
+
+
+
+def modify_pad_value(original_movie, transformed, sigma=20):
+    blurred = gaussian_filter(original_movie[0, :, :], sigma)
+    #blurred = gaussian_filter(blurred, sigma)
+
+    corrected = np.where(transformed <= blurred, blurred, transformed)
+
+    return corrected.astype(np.uint16)
+
 
 
 def channel_separate(movie_path):
@@ -57,10 +67,10 @@ def process_frame(frame, transform_mat, sr):
     """
     Process a single frame (CPU-bound task).
     """
-    if np.any(frame):
-        return to_uint16(sr.transform(frame, tmat=transform_mat))
-    else:
-        return frame
+    #transformed = sr.transform(frame, tmat=transform_mat)
+
+    return sr.transform(frame, tmat=transform_mat)
+
 
 def process_frame_chunk(frame_chunk, transform_mat, sr):
     """
@@ -80,11 +90,6 @@ def stackreg_channel_alignment(mov, transfer_matrix, num_processes=None):
     Align all frames in `mov` using hybrid parallelism.
     """
     sr = StackReg(StackReg.RIGID_BODY)
-
-    #if transfer_matrix is None:
-    # mov_image = mov[0, :, :]
-    # transform_mat = sr.register(ref, mov_image)
-    # else:
     transform_mat = transfer_matrix
 
     # Split the frames into chunks for multiprocessing
@@ -107,6 +112,8 @@ def stackreg_channel_alignment(mov, transfer_matrix, num_processes=None):
                 [(chunk, transform_mat, sr) for chunk in frame_chunks]
             )
         aligned_mov = np.concatenate(chunk_results, axis=0)
+
+    aligned_mov = modify_pad_value(original_movie=mov, transformed=aligned_mov)
 
     return aligned_mov
 
@@ -268,6 +275,11 @@ def process_correction_photobleaching(dir_path, gpu=True):
 
 if __name__ == "__main__":
     #process_correction_Localization("H:/competitive/20250325_8nt_comp_GAP_C")
-    process_correction_photobleaching('H:/photobleaching/20250322_8nt_NComp_photobleaching2')
+    process_correction_photobleaching('H:/photobleaching/20250322_8nt_NComp_photobleaching2/original_files')
 
-
+    # movie_files = [x for x in os.listdir('H:/photobleaching/20250322_8nt_NComp_photobleaching2') if x.endswith('.tif')]
+    # for file in movie_files:
+    #     img = imread('H:/photobleaching/20250322_8nt_NComp_photobleaching2/' + file)
+    #     bg = np.median(img)
+    #     new_img = np.where(img == 0, bg, img).astype(np.uint16)
+    #     imwrite('H:/photobleaching/20250322_8nt_NComp_photobleaching2/' + file, new_img)
