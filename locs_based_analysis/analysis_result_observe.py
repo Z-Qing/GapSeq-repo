@@ -6,6 +6,7 @@ from picasso_utils import one_channel_movie
 from picasso.io import save_locs, load_locs
 from scipy.spatial import KDTree
 import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 
 
@@ -109,35 +110,65 @@ def export_locs_picasso(ref_hdf5_path, index, movie_list, gpu=True, box_size=1.5
 # export_locs_picasso(ref_hdf5_path=hdf5_path, index=[389, 1173, 1360, 1940, 1644, 121], movie_list=movie_list, box_size=1.5)
 
 
-def counts_filtering(path, minimum_high_counts=200, maximum_high_counts=1000):
-    counts = pd.read_csv(path, index_col=0)
-    b1 = counts.max(axis=1) > minimum_high_counts
-    filtered_counts = counts.loc[b1.values, :]
 
-    b2 = filtered_counts.sum(axis=1) < maximum_high_counts
-    filtered_counts = filtered_counts.loc[b2.values, :]
+def counts_filtering(path, maximum_high_counts=900, min_event_diff=10,
+                        min_count_diff=50):
+    params = pd.read_csv(path, index_col=0, header=[0, 1])
 
-    largest = filtered_counts.max(axis=1)
-    second_largest = filtered_counts.apply(lambda row: row.nlargest(2).iloc[-1], axis=1)
-    # b3 = second_largest < minimum_high_counts / 2
-    # filtered_counts = filtered_counts.loc[b3.values, :]
+    counts = params.loc[:, (slice(None), 'count')]
+    counts.columns = counts.columns.droplevel(1)
 
+    event_num = params.loc[:, (slice(None), 'event_num')]
+    event_num.columns = event_num.columns.droplevel(1)
 
-    ratio = largest/second_largest
-    b3 = ratio > 2
-    filtered_counts = filtered_counts.loc[b3.values, :]
-    # #
-    selected_nuc = filtered_counts.idxmax(axis=1)
-    #
-    print(selected_nuc.value_counts())
-    #
-    print(filtered_counts[selected_nuc != 'G'])
-
-    # plt.hist(ratio, bins=np.arange(1, np.max(ratio), 0.5))
+    # second_largest_event_num = event_num.apply(lambda row: row.nlargest(2).iloc[-1], axis=1)
+    # plt.hist(event_num.max(axis=1) - second_largest_event_num, bins=50)
     # plt.show()
+    #
+    # second_largest_locs_num = counts.apply(lambda row: row.nlargest(2).iloc[-1], axis=1)
+    # plt.hist(counts.max(axis=1) - second_largest_locs_num, bins=50)
+    # plt.show()
+
+
+    #filter out fiduical markers
+    b1 = np.sum(counts > maximum_high_counts, axis=1) < 2
+    filtered_counts = counts.loc[b1.values, :]
+    filtered_events = event_num.loc[b1.values, :]
+
+
+
+    # maximum counts and event should be the same
+    selected_nuc_counts = filtered_counts.idxmax(axis=1)
+    selected_nuc_events = filtered_events.idxmax(axis=1)
+    b3 = selected_nuc_counts == selected_nuc_events
+
+    filtered_counts = filtered_counts.loc[b3.values, :]
+    filtered_events = filtered_events.loc[b3.values, :]
+
+    # reach minimum diff in locs counts
+    second_largest_counts = filtered_counts.apply(lambda row: row.nlargest(2).iloc[-1], axis=1)
+    diff = filtered_counts.max(axis=1) - second_largest_counts
+    b2 = diff > min_count_diff
+
+    filtered_counts = filtered_counts.loc[b2.values, :]
+    filtered_events = filtered_events.loc[b2.values, :]
+
+    # reach minimum diff in event number
+    second_largest_event_num = filtered_events.apply(lambda row: row.nlargest(2).iloc[-1], axis=1)
+    diff = filtered_events.max(axis=1) - second_largest_event_num
+    b4 = diff > min_event_diff
+
+    filtered_counts = filtered_counts.loc[b4.values, :]
+    filtered_events = filtered_events.loc[b4.values, :]
+
+    selected_nuc = filtered_counts.idxmax(axis=1)
+    print(selected_nuc.value_counts())
+    # print(filtered_counts[selected_nuc != 'G'])
+    # print(filtered_events[selected_nuc != 'G'])
 
     return
 
 
-counts_filtering("H:/photobleaching/20250322_8nt_NComp_photobleaching2/"
-                 "8nt_NComp_photobleaching2_Gap_C_localization_corrected_neighbour_counting.csv")
+
+counts_filtering_V2("H:/photobleaching/20250322_8nt_NComp_photobleaching2/median_25/"
+                 "8nt_NComp_photobleaching2_Gap_G_localization_corrected_neighbour_counting_radius1.5.csv")
