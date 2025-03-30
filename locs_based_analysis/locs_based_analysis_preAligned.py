@@ -6,6 +6,7 @@ import re
 import os
 from scipy.spatial import KDTree
 from picasso_utils import one_channel_movie
+from sklearn.cluster import DBSCAN
 
 
 
@@ -20,19 +21,18 @@ def neighbour_counting(ref_points, mov_points, nuc, box_radius=1.5):
     # Query neighbors within the given radius
     indices = tree.query_ball_point(ref_coords, box_radius)
 
-    # Count neighbors for each reference point
-    neighbor_counts = [len(neigh) for neigh in indices]
-
-    # Convert to DataFrame
-    params = pd.DataFrame({nuc: neighbor_counts})
+    params = pd.DataFrame(index=np.arange(ref_points.shape[0]))
+    params[(nuc, 'event_num')] = [mov_points.iloc[ind]['event_num'].sum() for ind in indices]
+    params[(nuc, 'count')] = [mov_points.iloc[ind]['count'].sum() for ind in indices]
+    
+    params.columns = pd.MultiIndex.from_tuples(params.columns)
     params.index.name = 'ref_index'
-
 
     return params
 
 
 
-def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=1.5, mov_gradient=1500,
+def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=1.5, mov_gradient=1000,
                                    gpu=True, ref_roi=None, ref_gradient=400,
                                    roi=None, save_hdf5=False):
     if ref_path.endswith('.hdf5'):
@@ -41,28 +41,32 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=1.
     elif ref_path.endswith('.tif'):
         ref = one_channel_movie(ref_path, roi=ref_roi, frame_range=0)
         ref.lq_fitting(GPU=gpu, min_net_gradient=ref_gradient, box=5)
-        ref.overlap_prevent(box_radius=search_radius*2)
+        ref.overlap_prevent(box_radius=search_radius * 2)
 
         ref_locs = ensure_sanity(ref.locs, ref.info) # make sure the csv and hdf5 match
-        save_locs(ref_path.replace('.tif', '_.hdf5'), ref_locs, ref.info)
+        save_locs(ref_path.replace('.tif', '.hdf5'), ref_locs, ref.info)
+
     else:
         raise ValueError('un-supported format')
 
-    nuc_locs = {}
+    nuc_cluster_param = {}
     for movie_path in mov_list:
         mov = one_channel_movie(movie_path, roi=roi)
+        mov.movie_format(baseline=20)
         mov.lq_fitting(gpu, min_net_gradient=mov_gradient, box=5)
+        mov.dbscan(eps=0.5, min_samples=20)
+        mov.trace_analysis(display=False)
 
         nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
-        nuc_locs[nuc] = mov.locs[['x', 'y']].copy()
+        nuc_cluster_param[nuc] = mov.cluster_param
 
         if save_hdf5:
-            save_locs(movie_path.replace('.tif', '.hdf5'), mov.locs, mov.info)
+            save_locs(movie_path.replace('.tif', '.hdf5'), locs, mov.info)
 
     # ----------------------- neighbour counting ----------------------
     total_params = []
-    for nuc in nuc_locs.keys():
-        param = neighbour_counting(ref_locs, nuc_locs[nuc], nuc, box_radius=search_radius)
+    for nuc in nuc_cluster_param.keys():
+        param = neighbour_counting(ref_locs, nuc_cluster_param[nuc], nuc, box_radius=search_radius)
         total_params.append(param)
 
     total_params = pd.concat(total_params, axis=1)
@@ -123,9 +127,10 @@ def process_analysis_ALEX(dir_path):
     return
 
 
+
 if __name__ == "__main__":
     #process_analysis_ALEX("H:/jagadish_data/20250308_IPE_trans_NTP200Exp15")
-    process_analysis_Localization('H:/photobleaching/20250322_8nt_NComp_photobleaching2/corrected_movies',
-                                  ref_path="H:/photobleaching/20250322_8nt_NComp_photobleaching2/corrected_movies/"
-                                           "8nt_NComp_photobleaching2_Gap_A_localization_corrected.tif",
+    process_analysis_Localization('H:/photobleaching/20250322_8nt_NComp_photobleaching2/median_25',
+                                  ref_path="H:/photobleaching/20250322_8nt_NComp_photobleaching2/median_25/"
+                                           "8nt_NComp_photobleaching2_Gap_G_localization_corrected.tif",
                                   pattern=r'_seal3([A-Z])_100nM')
