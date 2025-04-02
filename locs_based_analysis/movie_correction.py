@@ -8,36 +8,7 @@ from pystackreg import StackReg
 from pystackreg.util import to_uint16
 from picasso_utils import one_channel_movie
 import cupy as cp
-from cupyx.scipy.ndimage import gaussian_filter, median_filter, minimum_filter
-
-
-
-def background_remove(original_movie, sigma=25, method='minimum'):
-    ''''Note only the red channel of gap movies needs background remove
-     If apply the method in green channel of localization movies, localizations
-     will be removed'''
-
-    image_stack = cp.asarray(original_movie)
-
-    if method == 'gaussian':
-        bg = gaussian_filter(image_stack, sigma=(1, sigma, sigma))
-    elif method == 'median':
-        bg = median_filter(image_stack, size=(1, sigma, sigma))
-    elif method == 'minimum':
-        bg = minimum_filter(image_stack, size=(1, sigma, sigma))
-    else:
-        raise Warning('Method is either gaussian or median'.format(method))
-
-    bg_cpu = cp.asnumpy(bg)
-
-    # data type of both original_movie and bg_cpu is np.uint16
-    filtered_stack = original_movie - bg_cpu
-    filtered_stack = np.where(filtered_stack > 0, filtered_stack, 0)
-    #filtered_stack = np.clip(filtered_stack, 0, 65535)
-
-
-    return filtered_stack
-
+from scipy.ndimage import median_filter
 
 
 def channel_separate(movie_path):
@@ -55,8 +26,9 @@ def channel_separate(movie_path):
 
     return channel_1, channel_2
 
-def prepare_two_channel_movie(movie_path, gradient_1=400, drift_correction=True,
-                              gradient_2=400, box_1=5, box_2=5, gpu=True):
+
+def prepare_two_channel_movie(movie_path, gradient_1=1000, drift_correction=True,
+                              gradient_2=1000, box_1=5, box_2=5, gpu=True):
 
     channel_1, channel_2 = channel_separate(movie_path)
 
@@ -123,23 +95,31 @@ def stackreg_channel_alignment(mov, transfer_matrix, num_processes=None):
         aligned_mov = np.concatenate(chunk_results, axis=0)
 
     # data type of aligned_mov is float64
-    aligned_mov = np.where(aligned_mov < 0, 0, aligned_mov)
+    #aligned_mov = np.where(aligned_mov < 0, 0, aligned_mov)
 
-    return aligned_mov
+    return to_uint16(aligned_mov)
 
 
 
-def contrast_enhance(image, gamma = 1.5):
+def contrast_enhance(image, gamma=1.2):
     if len(image.shape) == 3:
         image = image[0, :, :]
+
+    bg = median_filter(image.astype(np.float32), size=21)
+    image = image - bg
+    image = np.where(image < 0, 0, image)
 
     min_img = np.min(image)
     max_img = np.max(image)
     image = (image - min_img) * (255.0 / (max_img - min_img))
 
-    image = (np.power(image / 255.0, gamma) * 255.0).astype(np.uint16)
+    # image = (np.power(image / 255.0, gamma) * 255.0)
+    #
+    # plt.style.use('default')
+    # plt.imshow(image, cmap='gray')
+    # plt.show()
 
-    return image
+    return image.astype(np.uint16)
 
 
 def align_red_green(movie_path, alignment_source, gpu=True):
@@ -165,18 +145,19 @@ def align_red_green(movie_path, alignment_source, gpu=True):
 
     aligned_ref = np.concatenate((channel_1.movie, aligned_channel_2_movie), axis=2)
 
-    return aligned_ref.astype(np.uint16), red_to_green_transform_mat
+    return aligned_ref, red_to_green_transform_mat
 
 
 
 
 
-def two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_mat, gpu,
-                           gb_remove=None):
+def two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_mat, gpu):
 
     green, red = prepare_two_channel_movie(movie_path, gpu=gpu, gradient_1=5000, gradient_2=400,
                                            box_1=5, box_2=5, drift_correction=True)
     green_image = green.movie[0, :, :]
+    #green_image = contrast_enhance(green_image)
+
 
     # align red to green
     red_aligned_movie = stackreg_channel_alignment(mov=red.movie, transfer_matrix=red_to_green_transform_mat)
@@ -188,19 +169,19 @@ def two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_m
 
     # align red to green_ref
     red_aligned_movie = stackreg_channel_alignment(mov=red_aligned_movie, transfer_matrix=green_to_green_ref_mat)
-    if bg_remove is not None:
-        red_aligned_movie = background_remove(red_aligned_movie, method=bg_remove)
+    # if bg_remove is not None:
+    #     red_aligned_movie = background_remove(red_aligned_movie, method=bg_remove, gpu=gpu)
 
     # concat two channels
     aligned_movie = np.concatenate((green_aligned_movie, red_aligned_movie), axis=2)
 
 
-    return aligned_movie.astype(np.uint16)
+    return aligned_movie
 
 
 
 def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True,
-                                 alignment_source='super-resolution', bg_remove_method=None):
+                                 alignment_source='super-resolution'):
     ''' This function do locs_based_analysis between different green channels using fiducial markers.
     And the fiducial markers can be detected easily in green channel but not red channel.
     The locs in green and red channels of transcription movie should be co-localized. Thus,
@@ -215,11 +196,11 @@ def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True,
     # the fiducial markers will stand out in the green channel
     channel_1, channel_2 = channel_separate(ref_movie_path)
     green_ref_image = channel_1.movie[0, :, :]
+    #green_ref_image = contrast_enhance(green_ref_image)
 
 
     for movie_path in movie_path_list:
-        aligned_movie = two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_mat, gpu,
-                                               bg_remove_method)
+        aligned_movie = two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_mat, gpu)
         imwrite(movie_path.replace('.tif', '_corrected.tif'), aligned_movie)
 
 
@@ -240,8 +221,7 @@ def process_correction_Localization(dir_path):
 
     movie_path_list = [os.path.join(dir_path, x) for x in files]
 
-    position_correction_fiducial(movie_path_list, ref_movie_path, alignment_source='first',
-                                 bg_remove_method=None)
+    position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True, alignment_source='first')
 
     return
 
@@ -260,8 +240,7 @@ def process_correction_ALEX(dir_path):
     trans_mov = dir_path + '/' + trans_mov
     file_list = [dir_path + '/' + x for x in file_list]
 
-    position_correction_fiducial(file_list, trans_mov, gpu=True, alignment_source='super-resolution',
-                                 bg_remove_method=None)
+    position_correction_fiducial(file_list, trans_mov, gpu=True, alignment_source='super-resolution')
 
     return
 
@@ -285,20 +264,13 @@ def process_correction_photobleaching(dir_path, gpu=True):
     mov_path.extend(localization_path)
 
 
-    position_correction_fiducial(mov_path, ref_path, alignment_source='first', gpu=gpu)
+    position_correction_fiducial(mov_path, ref_path, alignment_source='first',gpu=gpu)
 
     return
 
 
 
 if __name__ == "__main__":
-    #process_correction_Localization("H:/competitive/20250325_8nt_comp_GAP_C")
-    process_correction_photobleaching('H:/photobleaching/20250322_8nt_NComp_photobleaching2/original_files')
+    process_correction_Localization("H:/base5/20250401_GAP13_5ntseq_pos8seq/original_files")
+    #process_correction_photobleaching('H:/photobleaching/20250328_8nt_GAP_photobleach2')
 
-
-    # movie_files = [x for x in os.listdir('H:/photobleaching/20250322_8nt_NComp_photobleaching2') if x.endswith('.tif')]
-    # for file in movie_files:
-    #     img = imread('H:/photobleaching/20250322_8nt_NComp_photobleaching2/' + file)
-    #     bg = np.median(img)
-    #     new_img = np.where(img == 0, bg, img).astype(np.uint16)
-    #     imwrite('H:/photobleaching/20250322_8nt_NComp_photobleaching2/' + file, new_img)
