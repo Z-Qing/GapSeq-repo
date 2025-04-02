@@ -56,7 +56,7 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
         nuc_locs[nuc] = mov.locs[['x', 'y']].copy()
 
         if save_hdf5:
-            save_locs(movie_path.replace('.tif', '.hdf5'), locs, mov.info)
+            save_locs(movie_path.replace('.tif', '.hdf5'), mov.locs, mov.info)
 
     # ----------------------- neighbour counting ----------------------
     total_params = []
@@ -126,6 +126,6 @@ def process_analysis_ALEX(dir_path):
 
 
 if __name__ == "__main__":
-    process_analysis_ALEX("Y:/Qing_2/GAPSeq/corrected_IPE_trans_movies/20250308_IPE_trans_NTP200Exp15")
+    process_analysis_ALEX("Y:/Qing_2/GAPSeq/corrected_IPE_trans_movies/20250308_IPE_trans_NTP200Exp17")
     # process_analysis_Localization("H:/base5/20250401_GAP13_5ntseq_pos8seq/gamma_correction",
     #                               pattern=r'_S7([A-Za-z])1uM')
