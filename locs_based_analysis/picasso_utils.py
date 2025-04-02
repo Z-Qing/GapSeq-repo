@@ -5,6 +5,7 @@ from picasso.localize import identify_async, identifications_from_futures, get_s
 from picasso.aim import aim
 from picasso.clusterer import dbscan
 from picasso.postprocess import link
+from picasso.lib import ensure_sanity
 import cupy as cp
 from cupyx.scipy.ndimage import shift as cupy_shift
 from scipy.spatial import KDTree
@@ -122,44 +123,47 @@ class one_channel_movie(object):
 
         self.info.append(localize_info)
 
+        self.locs = ensure_sanity(self.locs, self.info)
+
         return
 
 
-    def drift_correction(self, GPU=True, segmentation=100, intersect_d=20 / 117, roi_r=60 / 117):
+    def drift_correction(self, GPU=True, drift=None, segmentation=100, intersect_d=20 / 117, roi_r=60 / 117):
         # self.lq_gpu_fitting(min_net_gradient=min_net_gradient, box=box)
         # the movie will be set during the lq_gpu_fitting
-        if self.locs is None:
-            raise ValueError("Please identify locs form the movie first")
+        if drift is None:
+            if max(self.locs['frame']) >= 3 * segmentation:
+                corrected_locs, new_info, drift = aim(self.locs, self.info,
+                            segmentation=segmentation, intersect_d=intersect_d, roi_r=roi_r)
 
-        if max(self.locs['frame']) >= 3 * segmentation:
-            corrected_locs, new_info, drift = aim(self.locs, self.info,
-                                                  segmentation=segmentation, intersect_d=intersect_d, roi_r=roi_r)
-            drift = drift.view(np.recarray)
-
-            if GPU:
-                # apply negative drift frame by frame using GPU
-                movie_gpu = cp.asarray(self.movie)
-                corrected_movie_gpu = cp.empty_like(movie_gpu)
-                for i in range(movie_gpu.shape[0]):
-                    aim_shift = (-drift[i][1], -drift[i][0])
-                    corrected_movie_gpu[i] = cupy_shift(movie_gpu[i], aim_shift, mode='constant', cval=0, order=0)
-
-                corrected_movie = cp.asnumpy(corrected_movie_gpu)
+                drift = drift.view(np.recarray)
+                self.locs = corrected_locs
+                self.info = new_info
 
             else:
-                corrected_movie = np.empty_like(self.movie)
-                for i in range(self.movie.shape[0]):
-                    aim_shift = (-drift[i][1], -drift[i][0])
-                    corrected_movie[i] = shift(self.movie[i], aim_shift, mode='constant', cval=0, order=0)
+                drift = np.zeros((len(self.locs), 2))
 
-            self.movie = corrected_movie
-            self.locs = corrected_locs
-            self.info = new_info
+
+        if GPU:
+                # apply negative drift frame by frame using GPU
+            movie_gpu = cp.asarray(self.movie)
+            corrected_movie_gpu = cp.empty_like(movie_gpu)
+            for i in range(movie_gpu.shape[0]):
+                aim_shift = (-drift[i][1], -drift[i][0])
+                corrected_movie_gpu[i] = cupy_shift(movie_gpu[i], aim_shift, mode='constant', cval=0, order=0)
+
+            corrected_movie = cp.asnumpy(corrected_movie_gpu)
 
         else:
-            pass
+            corrected_movie = np.empty_like(self.movie)
+            for i in range(self.movie.shape[0]):
+                aim_shift = (-drift[i][1], -drift[i][0])
+                corrected_movie[i] = shift(self.movie[i], aim_shift, mode='constant', cval=0, order=0)
 
-        return
+        self.movie = corrected_movie
+
+        return drift
+
 
 
     def dbscan(self, eps=0.5, min_samples=20):
@@ -227,24 +231,31 @@ class one_channel_movie(object):
 
 
     @staticmethod
-    def get_binding_event_num(trace, index, penalty=100000, min_size=10, min_intensity_increase=100,
+    def get_binding_event_num(trace, index, penalty=5, min_size=10, min_intensity_increase=100,
                               display=False):
-        algo = rpt.KernelCPD(kernel='linear', min_size=min_size).fit(trace)
+        algo = rpt.KernelCPD(kernel='rbf', min_size=min_size).fit(trace)
         bkps = algo.predict(pen=penalty)
         bkps = np.insert(bkps, 0, 0)
 
         starts = bkps[:-1]
         ends = bkps[1:]
 
-        intensities = [np.mean(trace[start + 1: end - 1]) for start, end in zip(starts, ends)]
-        binding_event_num = np.sum(np.diff(intensities) > min_intensity_increase)
+        intensities = np.array([np.mean(trace[start + 1: end - 1]) for start, end in zip(starts, ends)])
+
 
         if display:
             plt.plot(np.arange(len(trace)), trace)
             plt.vlines(bkps, ymin=min(trace), ymax=max(trace), colors='black', linestyles='dashed')
+            plt.title(index)
+            print(intensities)
+            print(np.sum(intensities > min_intensity_increase))
             plt.show()
 
+        binding_event_num = np.sum(intensities > min_intensity_increase)
+
         return binding_event_num, index
+
+
 
 
 
