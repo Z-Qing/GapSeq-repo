@@ -105,8 +105,9 @@ def process_analysis_ALEX(dir_path):
     if len(ref) != 1:
         raise ValueError("There should be one and only one reference file in the directory")
     else:
-        ref = os.path.join(dir_path, ref[0])
         ref_keyword = ref[0].replace('.hdf5', '')
+        ref = os.path.join(dir_path, ref[0])
+
 
     subfolder_pattern = {}
     subfolder_pattern['4D5X'] = r'_S4D5([A-Z])300nM'
@@ -126,6 +127,6 @@ def process_analysis_ALEX(dir_path):
 
 
 if __name__ == "__main__":
-    process_analysis_ALEX("Y:/Qing_2/GAPSeq/corrected_IPE_trans_movies/20250308_IPE_trans_NTP200Exp17")
+    process_analysis_ALEX("Y:/Qing_2/GAPSeq/corrected_IPE_trans_movies/20250316_IPE_trans_NTP200Exp23")
     # process_analysis_Localization("H:/base5/20250401_GAP13_5ntseq_pos8seq/gamma_correction",
     #                               pattern=r'_S7([A-Za-z])1uM')
