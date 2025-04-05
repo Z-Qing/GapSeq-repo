@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 
-
 def export_locs_PYMEVis(ref_hdf5_path, index, movie_list, pattern, gpu=True, box_size=1.5):
     ref_locs, _ = load_locs(ref_hdf5_path)
     ref_locs = pd.DataFrame(ref_locs)
@@ -22,7 +21,7 @@ def export_locs_PYMEVis(ref_hdf5_path, index, movie_list, pattern, gpu=True, box
         nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
 
         mov = one_channel_movie(movie_path, roi=roi)
-        mov.lq_fitting(gpu, min_net_gradient=1000, box=3)
+        mov.lq_fitting(gpu, min_net_gradient=1000, box=5)
         mov.overlap_prevent(box_radius=box_size)
 
         locs = pd.DataFrame(mov.locs)
@@ -62,7 +61,7 @@ def export_locs_PYMEVis(ref_hdf5_path, index, movie_list, pattern, gpu=True, box
 
 
 
-def export_locs_picasso(ref_hdf5_path, index, movie_list, gpu=True, box_size=1.5):
+def export_locs_picasso(ref_hdf5_path, index, movie_list, gpu=True, box_size=2):
     ref_locs, _ = load_locs(ref_hdf5_path)
     ref_locs = ref_locs.view(np.recarray)
     ref_coords = ref_locs[index]
@@ -73,8 +72,7 @@ def export_locs_picasso(ref_hdf5_path, index, movie_list, gpu=True, box_size=1.5
 
     for movie_path in movie_list:
         mov = one_channel_movie(movie_path, roi=roi)
-        mov.lq_fitting(gpu, min_net_gradient=1000, box=3)
-        mov.overlap_prevent(box_radius=box_size)
+        mov.lq_fitting(gpu, min_net_gradient=1000, box=5)
 
         mov_coords = np.column_stack((mov.locs['x'], mov.locs['y']))
 
@@ -101,74 +99,117 @@ def export_locs_picasso(ref_hdf5_path, index, movie_list, gpu=True, box_size=1.5
 
 
 
-# dir_path = 'H:/competitive/20250325_8nt_comp_GAP_C'
-# hdf5_path = "H:/competitive/20250325_8nt_comp_GAP_C/8nt_comp_GAP_C_GAP_C_localization_corrected_.hdf5"
+# dir_path = 'H:\competitive/20250325_8nt_comp_GAP_G'
+# hdf5_path = "H:\competitive/20250325_8nt_comp_GAP_G\8nt_comp_GAP_G_GAP_G_localization_corrected.hdf5"
 #
 # movie_list = [os.path.join(dir_path, x) for x in os.listdir(dir_path) if x.endswith('.tif')]
 # movie_list = [x for x in movie_list if 'localization' not in x and 'Localization' not in x]
-#
-# export_locs_picasso(ref_hdf5_path=hdf5_path, index=[389, 1173, 1360, 1940, 1644, 121], movie_list=movie_list, box_size=1.5)
+# #
+# export_locs_picasso(ref_hdf5_path=hdf5_path, index=[115, 135, 151, 472, 599, 749, 829, 920,
+#                                                     931, 979, 1015, 1022, 1045,
+#                                                     1263, 1264, 1378, 1490, 1541, 1690, 1871, 473], movie_list=movie_list, box_size=2)
 
 
+def nucleotide_selection_non_competitive(path, correct_pick=None, maximum_high_counts=1000,
+                                         minimum_diff=200):
+    counts = pd.read_csv(path, index_col=0)
 
-def counts_filtering(path, maximum_high_counts=900, min_event_diff=10,
-                        min_count_diff=50):
-    params = pd.read_csv(path, index_col=0, header=[0, 1])
+    counts = counts.loc[np.any(counts, axis=1)]
 
-    counts = params.loc[:, (slice(None), 'count')]
-    counts.columns = counts.columns.droplevel(1)
+    b1 = counts.max(axis=1) < maximum_high_counts
+    filtered_counts = counts.loc[b1.values, :].copy()
 
-    event_num = params.loc[:, (slice(None), 'event_num')]
-    event_num.columns = event_num.columns.droplevel(1)
+    second_largest = filtered_counts.apply(lambda row: row.nlargest(2).iloc[-1], axis=1)
 
-    # second_largest_event_num = event_num.apply(lambda row: row.nlargest(2).iloc[-1], axis=1)
-    # plt.hist(event_num.max(axis=1) - second_largest_event_num, bins=50)
-    # plt.show()
-    #
-    # second_largest_locs_num = counts.apply(lambda row: row.nlargest(2).iloc[-1], axis=1)
-    # plt.hist(counts.max(axis=1) - second_largest_locs_num, bins=50)
-    # plt.show()
-
-
-    #filter out fiduical markers
-    b1 = np.sum(counts > maximum_high_counts, axis=1) < 2
-    filtered_counts = counts.loc[b1.values, :]
-    filtered_events = event_num.loc[b1.values, :]
-
-
-
-    # maximum counts and event should be the same
-    selected_nuc_counts = filtered_counts.idxmax(axis=1)
-    selected_nuc_events = filtered_events.idxmax(axis=1)
-    b3 = selected_nuc_counts == selected_nuc_events
-
-    filtered_counts = filtered_counts.loc[b3.values, :]
-    filtered_events = filtered_events.loc[b3.values, :]
-
-    # reach minimum diff in locs counts
-    second_largest_counts = filtered_counts.apply(lambda row: row.nlargest(2).iloc[-1], axis=1)
-    diff = filtered_counts.max(axis=1) - second_largest_counts
-    b2 = diff > min_count_diff
+    diff = filtered_counts.max(axis=1) - second_largest
+    b2 = diff > minimum_diff
+    # filtered_counts['diff'] = diff
 
     filtered_counts = filtered_counts.loc[b2.values, :]
-    filtered_events = filtered_events.loc[b2.values, :]
 
-    # reach minimum diff in event number
-    second_largest_event_num = filtered_events.apply(lambda row: row.nlargest(2).iloc[-1], axis=1)
-    diff = filtered_events.max(axis=1) - second_largest_event_num
-    b4 = diff > min_event_diff
+    result = filtered_counts.idxmax(axis=1)
 
-    filtered_counts = filtered_counts.loc[b4.values, :]
-    filtered_events = filtered_events.loc[b4.values, :]
+    if correct_pick is None:
+        print(result)
+        return
 
-    selected_nuc = filtered_counts.idxmax(axis=1)
-    print(selected_nuc.value_counts())
-    # print(filtered_counts[selected_nuc != 'G'])
-    # print(filtered_events[selected_nuc != 'G'])
+    else:
+        total_num = result.sum()
+        correct_pick_num = result.loc[correct_pick]
+        accuracy_rate = correct_pick_num / total_num
 
-    return
+        return accuracy_rate, total_num
 
 
+# nucleotide_selection_non_competitive("H:/non_competitive/20250325_8nt_Noncomp_GAP_T/corrected_movies/"
+#                                      "8nt_Noncomp_GAP_T_GAP_T_localization_corrected_neighbour_counting.csv")
 
-counts_filtering_V2("H:/photobleaching/20250322_8nt_NComp_photobleaching2/median_25/"
-                 "8nt_NComp_photobleaching2_Gap_G_localization_corrected_neighbour_counting_radius1.5.csv")
+
+
+def nucleotide_selection_competitive(path, correct_pick, maximum_high_counts=1000,
+                                     threshold=None, save_csv=True):
+    complementary_nuc = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+
+    counts = pd.read_csv(path, index_col=0)
+
+    result = counts.copy()
+    result['pick'] = 'None'
+    result['minimum'] = counts.idxmin(axis=1).replace(complementary_nuc)
+
+    second_minimum_counts = counts.apply(lambda row: row.nlargest(3).iloc[-1], axis=1)
+    result['diff'] = second_minimum_counts - counts.min(axis=1)
+
+    # filtering based on noise to signal ratio
+    # result['noise_to_signal'] = result['diff'] / (second_minimum_counts + 0.000001)
+    # filtered_counts = counts.loc[result['noise_to_signal'] > 0.6, :]
+
+    b0 = np.sum(counts > 30, axis=1) >= 3
+    filtered_counts = counts.loc[b0.values, :]
+
+    b1 = ~(np.sum(filtered_counts > maximum_high_counts, axis=1) >= 1)
+    filtered_counts = filtered_counts.loc[b1.values, :]
+
+    diff = result.loc[filtered_counts.index, 'diff']
+
+    if threshold is not None:
+        b = diff > threshold
+        final_counts = filtered_counts.loc[b.values, :]
+        final_selection = final_counts.idxmin(axis=1)
+        print(final_selection.loc[final_selection != correct_pick])
+
+
+    rate_list = []
+    total_num_list = []
+    for min_count_diff in np.arange(10, 200, 10):
+        b2 = diff > min_count_diff
+
+        temp_counts = filtered_counts.loc[b2.values, :]
+        selected_nuc = temp_counts.idxmin(axis=1)
+        result.loc[temp_counts.index, 'pick'] = selected_nuc.replace(complementary_nuc)
+
+        result_summary = selected_nuc.value_counts()
+
+        correct_pick_num = result_summary.loc[correct_pick]
+        total_num = result_summary.sum()
+
+        total_num_list.append(result_summary.sum())
+        rate_list.append(correct_pick_num / total_num)
+
+    plt.plot(np.arange(10, 200, 10), rate_list, '-o')
+    plt.show()
+
+    plt.plot(np.arange(10, 200, 10), total_num_list, '-o')
+    plt.show()
+
+    df = pd.DataFrame({'diff threshold': np.arange(10, 200, 10),
+                       'accuracy rate': np.round(rate_list, 6), 'number of molecules': total_num_list})
+    if save_csv:
+        df.to_csv(os.path.dirname(path) + '/diff_noise_to_signal.csv')
+
+    return df
+
+
+
+# nucleotide_selection_competitive("H:\competitive/20250325_8nt_comp_GAP_C\
+# 8nt_comp_GAP_C_GAP_C_localization_corrected_neighbour_counting_radius2.csv",
+#                                  correct_pick='G', save_csv=True)
