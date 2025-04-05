@@ -70,7 +70,7 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
 
 
 
-def process_analysis_Localization(dir_path, pattern, ref_path=None):
+def process_analysis_Localization(dir_path, pattern, ref_path=None, search_radius=2):
     files = [x for x in os.listdir(dir_path) if x.endswith('.tif')]
 
     if ref_path == None:
@@ -88,18 +88,17 @@ def process_analysis_Localization(dir_path, pattern, ref_path=None):
 
     mov_list = [os.path.join(dir_path, x) for x in files if ('Localization' not in x) and ('localization' not in x)]
 
-    counts = locs_based_analysis_preAligned(ref, mov_list, pattern=pattern, search_radius=2, gpu=True,
+    counts = locs_based_analysis_preAligned(ref, mov_list, pattern=pattern, search_radius=search_radius, gpu=True,
                                             roi=[0, 428, 684, 856], ref_roi=[0, 0, 684, 428],
-                                            ref_gradient=400, mov_gradient=500, save_hdf5=False)
-
-    counts.to_csv(dir_path + '/{}_neighbour_counting.csv'.format(ref_keyword))
+                                            ref_gradient=400, mov_gradient=1000, save_hdf5=False)
+    counts.to_csv(dir_path + '/{}_neighbour_counting_radius{}.csv'.format(ref_keyword, search_radius))
 
 
     return
 
 
 
-def process_analysis_ALEX(dir_path):
+def process_analysis_ALEX(dir_path, search_radius=2):
     files = os.listdir(dir_path)
     ref = [x for x in files if x.endswith('.hdf5')]
     if len(ref) != 1:
@@ -110,23 +109,23 @@ def process_analysis_ALEX(dir_path):
 
 
     subfolder_pattern = {}
-    subfolder_pattern['4D5X'] = r'_S4D5([A-Z])300nM'
-    subfolder_pattern['4X5D'] = r'_S4([A-Z])5D300nM'
+    subfolder_pattern['4D5X'] = r'_S4D5([A-Z])300'
+    subfolder_pattern['4X5D'] = r'_S4([A-Z])5D300'
 
     for folder, pattern in subfolder_pattern.items():
         mov_list = os.listdir(os.path.join(dir_path, folder))
         mov_list = [os.path.join(dir_path, folder, x) for x in mov_list if x.endswith('.tif')]
 
-        counts = locs_based_analysis_preAligned(ref, mov_list=mov_list, pattern=pattern, search_radius=2, gpu=True,
-                                       roi=[0, 428, 684, 856], save_hdf5=False, mov_gradient=1500)
+        counts = locs_based_analysis_preAligned(ref, mov_list=mov_list, pattern=pattern, search_radius=search_radius, gpu=True,
+                                       roi=[0, 428, 684, 856], save_hdf5=False, mov_gradient=1000)
 
-        counts.to_csv(os.path.join(dir_path, folder) + '/{}_neighbour_counting.csv'.format(ref_keyword))
+        counts.to_csv(os.path.join(dir_path, folder) + '/{}_neighbour_counting_radius{}.csv'.format(ref_keyword, search_radius))
 
     return
 
 
 
 if __name__ == "__main__":
-    process_analysis_ALEX("Y:/Qing_2/GAPSeq/corrected_IPE_trans_movies/20250316_IPE_trans_NTP200Exp23")
-    # process_analysis_Localization("H:/base5/20250401_GAP13_5ntseq_pos8seq/gamma_correction",
-    #                               pattern=r'_S7([A-Za-z])1uM')
+    #process_analysis_ALEX("Y:/Qing_2/GAPSeq/corrected_IPE_trans_movies/20250317_IPE_trans_NTP200Exp27")
+    process_analysis_Localization("H:\competitive/20250325_8nt_comp_GAP_C",
+                                  pattern=r'_S3([A-Za-z])_200', search_radius=2)
