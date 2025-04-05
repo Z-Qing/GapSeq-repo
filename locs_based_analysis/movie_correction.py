@@ -101,7 +101,7 @@ def stackreg_channel_alignment(mov, transfer_matrix, num_processes=None):
 
 
 
-def contrast_enhance(image, gamma=1.2):
+def contrast_enhance(image):
     if len(image.shape) == 3:
         image = image[0, :, :]
 
@@ -112,12 +112,6 @@ def contrast_enhance(image, gamma=1.2):
     min_img = np.min(image)
     max_img = np.max(image)
     image = (image - min_img) * (255.0 / (max_img - min_img))
-
-    # image = (np.power(image / 255.0, gamma) * 255.0)
-    #
-    # plt.style.use('default')
-    # plt.imshow(image, cmap='gray')
-    # plt.show()
 
     return image.astype(np.uint16)
 
@@ -153,7 +147,7 @@ def align_red_green(movie_path, alignment_source, gpu=True):
 
 def two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_mat, gpu):
 
-    green, red = prepare_two_channel_movie(movie_path, gpu=gpu, gradient_1=5000, gradient_2=400,
+    green, red = prepare_two_channel_movie(movie_path, gpu=gpu, gradient_1=5000, gradient_2=1000,
                                            box_1=5, box_2=5, drift_correction=True)
     green_image = green.movie[0, :, :]
     #green_image = contrast_enhance(green_image)
@@ -271,6 +265,6 @@ def process_correction_photobleaching(dir_path, gpu=True):
 
 
 if __name__ == "__main__":
-    process_correction_Localization("H:/base5/20250401_GAP13_5ntseq_pos8seq/original_files")
+    process_correction_Localization("H:/base5/20250403_GAP13_5ntseq_pos9seq5%dex15%form")
     #process_correction_photobleaching('H:/photobleaching/20250328_8nt_GAP_photobleach2')
 
