@@ -52,11 +52,11 @@ def process_frame(frame, transform_mat, sr):
     return sr.transform(frame, tmat=transform_mat)
 
 
-def process_frame_chunk(frame_chunk, transform_mat, sr):
+def process_frame_chunk(frame_chunk, transform_mat, sr, max_threads=4):
     """
     Process a chunk of frames using multithreading.
     """
-    with ThreadPoolExecutor() as thread_pool:
+    with ThreadPoolExecutor(max_workers=max_threads) as thread_pool:
         # Process all frames in the chunk in parallel using threads
         results = list(thread_pool.map(
             lambda frame: process_frame(frame, transform_mat, sr),
@@ -65,7 +65,7 @@ def process_frame_chunk(frame_chunk, transform_mat, sr):
     return results
 
 
-def stackreg_channel_alignment(mov, transfer_matrix, num_processes=None):
+def stackreg_channel_alignment(mov, transfer_matrix, num_processes=4):
     """
     Align all frames in `mov` using hybrid parallelism.
     """
@@ -94,9 +94,6 @@ def stackreg_channel_alignment(mov, transfer_matrix, num_processes=None):
             )
         aligned_mov = np.concatenate(chunk_results, axis=0)
 
-    # data type of aligned_mov is float64
-    #aligned_mov = np.where(aligned_mov < 0, 0, aligned_mov)
-
     return to_uint16(aligned_mov)
 
 
@@ -117,13 +114,12 @@ def contrast_enhance(image):
 
 
 def align_red_green(movie_path, alignment_source, gpu=True):
+    channel_1, channel_2 = prepare_two_channel_movie(movie_path, gpu=gpu, drift_correction=True)
     if alignment_source == 'super-resolution':
-        channel_1, channel_2 = prepare_two_channel_movie(movie_path, gpu=gpu, drift_correction=True)
         _, image_1 = _render.render(channel_1.locs, channel_1.info)
         _, image_2 = _render.render(channel_2.locs, channel_2.info)
 
     elif alignment_source == 'first':
-        channel_1, channel_2 = prepare_two_channel_movie(movie_path, gpu=gpu, drift_correction=False)
         image_1 = contrast_enhance(channel_1.movie)
         image_2 = contrast_enhance(channel_2.movie)
 
@@ -204,9 +200,9 @@ def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True,
 
 import os
 
-def process_correction_Localization(dir_path):
+def process_correction_Localization(dir_path, localization_key='localization'):
     files = [x for x in os.listdir(dir_path) if x.endswith('.tif')]
-    ref = [x for x in files if 'Localization' in x or 'localization' in x]
+    ref = [x for x in files if localization_key in x]
     if len(ref) != 1:
         raise ValueError("There should be one and only one reference file in the directory")
 
@@ -216,25 +212,6 @@ def process_correction_Localization(dir_path):
     movie_path_list = [os.path.join(dir_path, x) for x in files]
 
     position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True, alignment_source='first')
-
-    return
-
-
-def process_correction_ALEX(dir_path):
-    file_list = os.listdir(dir_path)
-    file_list = [x for x in file_list if x.endswith('.tif')]
-    trans_mov = [x for x in file_list if 'ALEX' in x]
-
-    if len(trans_mov) != 1:
-        raise ValueError('There should be only one transcription movie in the folder')
-
-    trans_mov = trans_mov[0]
-    file_list.remove(trans_mov)
-
-    trans_mov = dir_path + '/' + trans_mov
-    file_list = [dir_path + '/' + x for x in file_list]
-
-    position_correction_fiducial(file_list, trans_mov, gpu=True, alignment_source='super-resolution')
 
     return
 
@@ -265,6 +242,7 @@ def process_correction_photobleaching(dir_path, gpu=True):
 
 
 if __name__ == "__main__":
-    process_correction_Localization("H:/base5/20250403_GAP13_5ntseq_pos9seq5%dex15%form")
+    process_correction_Localization("G:/20250405_IPE_NTP200_ALEX_exp29/original_files",
+                                    localization_key='combined')
     #process_correction_photobleaching('H:/photobleaching/20250328_8nt_GAP_photobleach2')
 

@@ -122,13 +122,13 @@ class one_channel_movie(object):
             "Fit method": 'lq'}
 
         self.info.append(localize_info)
-
         self.locs = ensure_sanity(self.locs, self.info)
 
         return
 
 
-    def drift_correction(self, GPU=True, drift=None, segmentation=100, intersect_d=20 / 117, roi_r=60 / 117):
+    def drift_correction(self, GPU=True, drift=None, segmentation=100,
+                         intersect_d=20 / 117, roi_r=60 / 117):
         # self.lq_gpu_fitting(min_net_gradient=min_net_gradient, box=box)
         # the movie will be set during the lq_gpu_fitting
         if drift is None:
@@ -150,7 +150,7 @@ class one_channel_movie(object):
             corrected_movie_gpu = cp.empty_like(movie_gpu)
             for i in range(movie_gpu.shape[0]):
                 aim_shift = (-drift[i][1], -drift[i][0])
-                corrected_movie_gpu[i] = cupy_shift(movie_gpu[i], aim_shift, mode='constant', cval=0, order=0)
+                corrected_movie_gpu[i] = cupy_shift(movie_gpu[i], aim_shift, mode='constant', cval=0, order=3)
 
             corrected_movie = cp.asnumpy(corrected_movie_gpu)
 
@@ -158,7 +158,7 @@ class one_channel_movie(object):
             corrected_movie = np.empty_like(self.movie)
             for i in range(self.movie.shape[0]):
                 aim_shift = (-drift[i][1], -drift[i][0])
-                corrected_movie[i] = shift(self.movie[i], aim_shift, mode='constant', cval=0, order=0)
+                corrected_movie[i] = shift(self.movie[i], aim_shift, mode='constant', cval=0, order=3)
 
         self.movie = corrected_movie
 
