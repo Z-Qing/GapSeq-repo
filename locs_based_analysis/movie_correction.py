@@ -200,7 +200,7 @@ def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True,
 
 import os
 
-def process_correction(dir_path, localization_key='localization'):
+def process_correction(dir_path, localization_key='localization', alignment_source='first'):
     files = [x for x in os.listdir(dir_path) if x.endswith('.tif')]
     ref_list = [x for x in files if localization_key in x]
 
@@ -223,12 +223,12 @@ def process_correction(dir_path, localization_key='localization'):
     else:
         raise ValueError('no file is found')
 
-    position_correction_fiducial(mov_path, ref_path, gpu=True, alignment_source='first')
+    position_correction_fiducial(mov_path, ref_path, gpu=True, alignment_source=alignment_source)
 
     return
 
 
 if __name__ == "__main__":
     process_correction("G:/20250405_IPE_NTP200_ALEX_exp29/original_files",
-                                    localization_key='combined')
+                        alignment_source='first', localization_key='combined')
 
