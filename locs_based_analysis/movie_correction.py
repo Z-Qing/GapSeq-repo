@@ -200,49 +200,35 @@ def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True,
 
 import os
 
-def process_correction_Localization(dir_path, localization_key='localization'):
+def process_correction(dir_path, localization_key='localization'):
     files = [x for x in os.listdir(dir_path) if x.endswith('.tif')]
-    ref = [x for x in files if localization_key in x]
-    if len(ref) != 1:
-        raise ValueError("There should be one and only one reference file in the directory")
+    ref_list = [x for x in files if localization_key in x]
 
-    files.remove(ref[0])
-    ref_movie_path = os.path.join(dir_path, ref[0])
+    if len(ref_list) == 1:
+        ref_path =os.path.join(dir_path, ref[0])
+        files.remove(ref[0])
+        mov_path = [os.path.join(dir_path, x) for x in files]
 
-    movie_path_list = [os.path.join(dir_path, x) for x in files]
+    elif len(ref_list) > 1:
+        # this branch is for photobleaching data
+        mov_path = [x for x in files if x not in ref_list]
+        mov_path = [os.path.join(dir_path, x) for x in mov_path]
 
-    position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True, alignment_source='first')
+        ref_path_list = [os.path.join(dir_path, x) for x in ref_list]
+        ref_path = min(ref_path_list, key=os.path.getmtime)
+
+        ref_path_list.remove(ref_path)
+        mov_path.extend(ref_path_list)
+
+    else:
+        raise ValueError('no file is found')
+
+    position_correction_fiducial(mov_path, ref_path, gpu=True, alignment_source='first')
 
     return
-
-
-
-def process_correction_photobleaching(dir_path, gpu=True):
-    files = [x for x in os.listdir(dir_path) if x.endswith('.tif')]
-    localization_path = [x for x in files if 'Localization' in x or 'localization' in x]
-
-    mov_path = [x for x in files if x not in localization_path]
-
-    localization_path = [os.path.join(dir_path, x) for x in localization_path]
-    mov_path = [os.path.join(dir_path, x) for x in mov_path]
-
-    # -------------------get red to green transformation matrix------------------
-    # the first movie (no phot0-bleaching) should have the strongest signal
-    ref_path = min(localization_path, key=os.path.getmtime)
-
-    # align the result of localization movie and gap movies in thee same way
-    localization_path.remove(ref_path)
-    mov_path.extend(localization_path)
-
-
-    position_correction_fiducial(mov_path, ref_path, alignment_source='first',gpu=gpu)
-
-    return
-
 
 
 if __name__ == "__main__":
-    process_correction_Localization("G:/20250405_IPE_NTP200_ALEX_exp29/original_files",
+    process_correction("G:/20250405_IPE_NTP200_ALEX_exp29/original_files",
                                     localization_key='combined')
-    #process_correction_photobleaching('H:/photobleaching/20250328_8nt_GAP_photobleach2')
 
