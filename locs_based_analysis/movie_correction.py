@@ -52,11 +52,11 @@ def process_frame(frame, transform_mat, sr):
     return sr.transform(frame, tmat=transform_mat)
 
 
-def process_frame_chunk(frame_chunk, transform_mat, sr, max_threads=4):
+def process_frame_chunk(frame_chunk, transform_mat, sr):
     """
     Process a chunk of frames using multithreading.
     """
-    with ThreadPoolExecutor(max_workers=max_threads) as thread_pool:
+    with ThreadPoolExecutor() as thread_pool:
         # Process all frames in the chunk in parallel using threads
         results = list(thread_pool.map(
             lambda frame: process_frame(frame, transform_mat, sr),
@@ -65,7 +65,7 @@ def process_frame_chunk(frame_chunk, transform_mat, sr, max_threads=4):
     return results
 
 
-def stackreg_channel_alignment(mov, transfer_matrix, num_processes=4):
+def stackreg_channel_alignment(mov, transfer_matrix, num_processes=None):
     """
     Align all frames in `mov` using hybrid parallelism.
     """
@@ -200,7 +200,7 @@ def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True,
 
 import os
 
-def process_correction(dir_path, localization_key='localization', alignment_source='first'):
+def process_correction(dir_path, localization_key='localization', alignment_source='first', gpu=True):
     files = [x for x in os.listdir(dir_path) if x.endswith('.tif')]
     ref_list = [x for x in files if localization_key in x]
 
@@ -223,12 +223,12 @@ def process_correction(dir_path, localization_key='localization', alignment_sour
     else:
         raise ValueError('no file is found')
 
-    position_correction_fiducial(mov_path, ref_path, gpu=True, alignment_source=alignment_source)
+    position_correction_fiducial(mov_path, ref_path, gpu=gpu, alignment_source=alignment_source)
 
     return
 
 
 if __name__ == "__main__":
     process_correction("G:/20250405_IPE_NTP200_ALEX_exp29/original_files",
-                        alignment_source='first', localization_key='combined')
+                        alignment_source='first', localization_key='combined', gpu=False)
 
