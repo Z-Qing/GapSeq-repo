@@ -85,7 +85,7 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
 
 
 def process_analysis_Localization(dir_path, pattern, localization_keyword='localization',
-                                  ref_path=None, search_radius=2, gradient=1000):
+                                  ref_path=None, search_radius=2, gradient=1000, gpu=True):
     files = [x for x in os.listdir(dir_path) if x.endswith('.tif')]
 
     if ref_path == None:
@@ -103,7 +103,7 @@ def process_analysis_Localization(dir_path, pattern, localization_keyword='local
 
     mov_list = [os.path.join(dir_path, x) for x in files if ('Localization' not in x) and ('localization' not in x)]
 
-    counts = locs_based_analysis_preAligned(ref, mov_list, pattern=pattern, search_radius=search_radius, gpu=True,
+    counts = locs_based_analysis_preAligned(ref, mov_list, pattern=pattern, search_radius=search_radius, gpu=gpu,
                                             roi=[0, 428, 684, 856], ref_roi=[0, 0, 684, 428],
                                             ref_gradient=400, mov_gradient=gradient, save_hdf5=False)
     counts.to_csv(dir_path + '/{}_neighbour_counting_radius{}_linked.csv'.format(ref_keyword, search_radius))
@@ -144,5 +144,5 @@ def process_analysis_ALEX(dir_path, search_radius=2, gradient=1000, gpu=True):
 if __name__ == "__main__":
     process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
     # process_analysis_Localization("G:/non_competitive/20250325_8nt_Noncomp_GAP_T",
-    #                               localization_keyword='localization',
+    #                               localization_keyword='localization', gpu=False,
     #                               pattern=r'_seal3([A-Za-z])_', search_radius=2, gradient=1000)
