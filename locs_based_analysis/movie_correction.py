@@ -205,8 +205,8 @@ def process_correction(dir_path, localization_key='localization', alignment_sour
     ref_list = [x for x in files if localization_key in x]
 
     if len(ref_list) == 1:
-        ref_path =os.path.join(dir_path, ref[0])
-        files.remove(ref[0])
+        ref_path =os.path.join(dir_path, ref_list[0])
+        files.remove(ref_list[0])
         mov_path = [os.path.join(dir_path, x) for x in files]
 
     elif len(ref_list) > 1:
@@ -229,6 +229,6 @@ def process_correction(dir_path, localization_key='localization', alignment_sour
 
 
 if __name__ == "__main__":
-    process_correction("G:/20250405_IPE_NTP200_ALEX_exp29/original_files",
-                        alignment_source='first', localization_key='combined', gpu=False)
+    process_correction("G:/3base/20250411_13ntGAP_P3degen_f10dex115formspe_stanf",
+                        alignment_source='first', localization_key='localizaiton', gpu=True)
 
