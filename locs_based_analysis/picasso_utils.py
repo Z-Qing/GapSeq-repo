@@ -161,7 +161,6 @@ class one_channel_movie(object):
                 drift = drift.view(np.recarray)
                 self.locs = corrected_locs
                 self.info = new_info
-
             else:
                 drift = np.zeros((len(self.locs), 2))
 
@@ -172,7 +171,7 @@ class one_channel_movie(object):
             corrected_movie_gpu = cp.empty_like(movie_gpu)
             for i in range(movie_gpu.shape[0]):
                 aim_shift = (-drift[i][1], -drift[i][0])
-                corrected_movie_gpu[i] = cupy_shift(movie_gpu[i], aim_shift, mode='constant', cval=0, order=3)
+                corrected_movie_gpu[i] = cupy_shift(movie_gpu[i], aim_shift, mode='constant', cval=0, order=1)
 
             corrected_movie = cp.asnumpy(corrected_movie_gpu)
 
@@ -180,7 +179,7 @@ class one_channel_movie(object):
             corrected_movie = np.empty_like(self.movie)
             for i in range(self.movie.shape[0]):
                 aim_shift = (-drift[i][1], -drift[i][0])
-                corrected_movie[i] = shift(self.movie[i], aim_shift, mode='constant', cval=0, order=3)
+                corrected_movie[i] = shift(self.movie[i], aim_shift, mode='constant', cval=0, order=1)
 
         self.movie = corrected_movie
 
