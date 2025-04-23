@@ -15,11 +15,8 @@ def channel_separate(movie_path):
     movie = imread(movie_path)
     h, w = movie.shape[1], movie.shape[2]
 
-    rio_1 = [0, 0, h, w // 2]
-    rio_2 = [0, w // 2, h, w]
-
-    channel_1 = one_channel_movie(movie_path, roi=rio_1)
-    channel_2 = one_channel_movie(movie_path, roi=rio_2)
+    channel_1 = one_channel_movie(movie[:, :, :w//2])
+    channel_2 = one_channel_movie(movie[:, :, w//2:])
 
     channel_1.movie_format()
     channel_2.movie_format()
@@ -201,7 +198,7 @@ def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True,
 import os
 
 def process_correction(dir_path, localization_key='localization', alignment_source='first', gpu=True):
-    files = [x for x in os.listdir(dir_path) if x.endswith('.tif')]
+    files = [x for x in os.listdir(dir_path) if x.endswith('.tif') or x.endswith('.raw')]
     ref_list = [x for x in files if localization_key in x]
 
     if len(ref_list) == 1:
@@ -229,6 +226,6 @@ def process_correction(dir_path, localization_key='localization', alignment_sour
 
 
 if __name__ == "__main__":
-    process_correction("G:/3base/20250411_13ntGAP_P3degen_f10dex115formspe_stanf",
-                        alignment_source='first', localization_key='localizaiton', gpu=True)
+    process_correction("G:\CAP binding",
+                        alignment_source='first', localization_key='localization', gpu=True)
 

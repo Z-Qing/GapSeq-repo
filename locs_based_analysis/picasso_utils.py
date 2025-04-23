@@ -19,15 +19,31 @@ import matplotlib.pyplot as plt
 
 
 class one_channel_movie(object):
-    def __init__(self, movie_path, roi=None, frame_range=None):
-        self.movie_path = movie_path
+    def __init__(self, movie, roi=None, frame_range=None):
+        if isinstance(movie, str):
+            self.movie_path = movie
+            self.movie = None
+            self.info = None
+
+        elif isinstance(movie, np.ndarray):
+            self.movie = movie
+            self.movie_path = None
+            initial_dict = {'Byte Order': '<',
+                            'Data Type': 'uint16',
+                            'File': '',
+                            'Frames': movie.shape[0],
+                            'Height': movie.shape[1],
+                            'Micro-Manager Acquisiton Comments': '',
+                            'Width': movie.shape[2],}
+            self.info = [initial_dict]
+        else:
+            raise ValueError("movie must be a string (path to the movie file) or a numpy array")
+
         self.roi = roi
         self.frame_range = frame_range
         self.camera_info = {}
 
-        self.movie = None
         self.locs = None
-        self.info = None
         self.cluster_param = None
 
     def __getitem__(self, index):
@@ -36,34 +52,40 @@ class one_channel_movie(object):
     # this function is modified from the localize function in picasso.localize
     # and it exports the fitting quality as well
     def movie_format(self, baseline=400):
-        movie, info = load_movie(self.movie_path)
+        if self.movie_path is not None:
+            movie, info = load_movie(self.movie_path)
+            # handle the roi before feeding it into the picasso functions
+            if self.roi is not None:
+                movie = movie[:, self.roi[0]: self.roi[2], self.roi[1]: self.roi[3]]
+
+                info[0]['Width'] = self.roi[3] - self.roi[1]
+                info[0]['Height'] = self.roi[2] - self.roi[0]
+
+            # change the frame range if it is not None
+            if self.frame_range is not None:
+                if isinstance(self.frame_range, (list, tuple)):
+                    movie = movie[self.frame_range[0]: self.frame_range[1], :, :]
+                    info[0]['Frames'] = self.frame_range[1] - self.frame_range[0]
+
+                if isinstance(self.frame_range, int):
+                    movie = movie[self.frame_range, :, :]
+                    movie = movie[np.newaxis, :, :]
+                    info[0]['Frames'] = 1
+
+                else:
+                    raise ValueError("frame_range must be a list/tuple for a range or"
+                                     " an integer for a single frame")
+
+        elif self.movie is not None:
+            movie = self.movie
+            info = self.info
+        else:
+            raise ValueError("Please provide either a movie path or a movie array")
 
         self.camera_info["Baseline"] = baseline
         self.camera_info["Sensitivity"] = 2.5
         self.camera_info["Gain"] = 1
         self.camera_info["qe"] = 0.82
-
-        # handle the roi before feeding it into the picasso functions
-        if self.roi is not None:
-            movie = movie[:, self.roi[0]: self.roi[2], self.roi[1]: self.roi[3]]
-
-            info[0]['Width'] = self.roi[3] - self.roi[1]
-            info[0]['Height'] = self.roi[2] - self.roi[0]
-
-        # change the frame range if it is not None
-        if self.frame_range is not None:
-            if isinstance(self.frame_range, (list, tuple)):
-                movie = movie[self.frame_range[0]: self.frame_range[1], :, :]
-                info[0]['Frames'] = self.frame_range[1] - self.frame_range[0]
-
-            if isinstance(self.frame_range, int):
-                movie = movie[self.frame_range, :, :]
-                movie = movie[np.newaxis, :, :]
-                info[0]['Frames'] = 1
-
-            else:
-                raise ValueError("frame_range must be a list/tuple for a range or"
-                                 " an integer for a single frame")
 
         self.movie = movie
         self.info = info
