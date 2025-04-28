@@ -146,70 +146,63 @@ def nucleotide_selection_non_competitive(path, correct_pick=None, maximum_high_c
 
 
 
-def nucleotide_selection_competitive(path, correct_pick, maximum_high_counts=1000,
-                                     threshold=None, save_csv=True):
+def nucleotide_selection_competitive(path, correct_pick=None):
     complementary_nuc = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
 
-    counts = pd.read_csv(path, index_col=0)
+    counts = pd.read_csv(path, index_col=0, header=[0, 1])
+    linked = counts['linked']
+    regular = counts['regular']
 
-    result = counts.copy()
-    result['pick'] = 'None'
-    result['minimum'] = counts.idxmin(axis=1).replace(complementary_nuc)
+    b = np.sum(regular > 1000, axis=1) == 0
+    regular = regular.loc[b]
+    linked = linked.loc[b]
 
-    second_minimum_counts = counts.apply(lambda row: row.nlargest(3).iloc[-1], axis=1)
-    result['diff'] = second_minimum_counts - counts.min(axis=1)
+    b = np.sum(linked > 5, axis=1) >= 3
+    regular = regular.loc[b]
+    linked = linked.loc[b]
 
-    # filtering based on noise to signal ratio
-    # result['noise_to_signal'] = result['diff'] / (second_minimum_counts + 0.000001)
-    # filtered_counts = counts.loc[result['noise_to_signal'] > 0.6, :]
+    c_regular = regular.idxmin(axis=1)
+    c_linked = linked.idxmin(axis=1)
+    b = c_regular == c_linked
+    regular = regular.loc[b]
+    linked = linked.loc[b]
 
-    b0 = np.sum(counts > 30, axis=1) >= 3
-    filtered_counts = counts.loc[b0.values, :]
-
-    b1 = ~(np.sum(filtered_counts > maximum_high_counts, axis=1) >= 1)
-    filtered_counts = filtered_counts.loc[b1.values, :]
-
-    diff = result.loc[filtered_counts.index, 'diff']
-
-    if threshold is not None:
-        b = diff > threshold
-        final_counts = filtered_counts.loc[b.values, :]
-        final_selection = final_counts.idxmin(axis=1)
-        print(final_selection.loc[final_selection != correct_pick])
+    choice = regular.idxmin(axis=1)
+    choice = choice.replace(complementary_nuc)
+    print(choice.value_counts())
 
 
-    rate_list = []
-    total_num_list = []
-    for min_count_diff in np.arange(10, 200, 10):
-        b2 = diff > min_count_diff
+    if correct_pick is not None:
+        second_minimum = regular.apply(lambda row: row.nlargest(3).iloc[-1], axis=1)
+        diff = second_minimum - regular.min(axis=1)
 
-        temp_counts = filtered_counts.loc[b2.values, :]
-        selected_nuc = temp_counts.idxmin(axis=1)
-        result.loc[temp_counts.index, 'pick'] = selected_nuc.replace(complementary_nuc)
+        rate_list = []
+        total_num_list = []
+        for threshold in np.arange(0, 200, 5):
+            filtered = regular.loc[diff >= threshold]
 
-        result_summary = selected_nuc.value_counts()
+            choice = filtered.idxmin(axis=1)
+            choice = choice.replace(complementary_nuc)
+            choice = choice.value_counts()
+            # print(threshold)
+            # print(choice)
 
-        correct_pick_num = result_summary.loc[correct_pick]
-        total_num = result_summary.sum()
+            correct_pick_num = choice.loc[correct_pick]
+            total_num = choice.sum()
+            rate = correct_pick_num / total_num
+            rate_list.append(rate)
+            total_num_list.append(total_num)
 
-        total_num_list.append(result_summary.sum())
-        rate_list.append(correct_pick_num / total_num)
+        plt.plot(np.arange(0, 200, 5), rate_list, '-o')
+        plt.show()
 
-    plt.plot(np.arange(10, 200, 10), rate_list, '-o')
-    plt.show()
+        plt.plot(np.arange(0, 200, 5), total_num_list, '-o')
+        plt.show()
 
-    plt.plot(np.arange(10, 200, 10), total_num_list, '-o')
-    plt.show()
-
-    df = pd.DataFrame({'diff threshold': np.arange(10, 200, 10),
-                       'accuracy rate': np.round(rate_list, 6), 'number of molecules': total_num_list})
-    if save_csv:
-        df.to_csv(os.path.dirname(path) + '/diff_noise_to_signal.csv')
-
-    return df
+    return
 
 
 
-# nucleotide_selection_competitive("H:\competitive/20250325_8nt_comp_GAP_C\
-# 8nt_comp_GAP_C_GAP_C_localization_corrected_neighbour_counting_radius2.csv",
-#                                  correct_pick='G', save_csv=True)
+nucleotide_selection_competitive("G:/CAP binding/20250427_Gseq1base_CAPbinding2nd/"
+                "Gseq1base_CAPbinding2nd_CAP_localization_corrected_picasso_bboxes_neighbour_counting_radius2_linked_g1000.csv",
+                                 correct_pick='T')
