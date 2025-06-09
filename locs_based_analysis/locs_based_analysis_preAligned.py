@@ -84,8 +84,8 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
 
 
 
-def process_analysis_Localization(dir_path, pattern, localization_keyword='localization',
-                                  ref_path=None, search_radius=2, gradient=1000, gpu=True):
+def process_analysis_Localization(dir_path, pattern, ref_path=None, localization_keyword='localization',
+                                   search_radius=2, gradient=1000, gpu=True):
     files = [x for x in os.listdir(dir_path) if x.endswith('.tif')]
 
     if ref_path is None:
@@ -101,7 +101,7 @@ def process_analysis_Localization(dir_path, pattern, localization_keyword='local
         ref_keyword = os.path.basename(ref_path).split('.')[0]
 
 
-    mov_list = [os.path.join(dir_path, x) for x in files if ('Localization' not in x) and ('localization' not in x)]
+    mov_list = [os.path.join(dir_path, x) for x in files if localization_keyword not in x]
 
     counts = locs_based_analysis_preAligned(ref, mov_list, pattern=pattern, search_radius=search_radius, gpu=gpu,
                                             roi=[0, 428, 684, 856], ref_roi=[0, 0, 684, 428],
@@ -143,7 +143,9 @@ def process_analysis_ALEX(dir_path, search_radius=2, gradient=1000, gpu=True):
 
 if __name__ == "__main__":
     #process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
-    process_analysis_Localization("G:/non_competitive/20250325_8nt_Noncomp_GAP_T",
-                                  localization_keyword='localization', gpu=False,
-                                  ref_path=None,
-                                  pattern=r'_seal3([A-Za-z])_', search_radius=2, gradient=1000)
+    process_analysis_Localization("G:/temp",
+                                  ref_path="G:/temp/8nt_GAP_G_comp_complementarystand_GAP_G_localization_corrected_picasso_bboxes.hdf5",
+                                  localization_keyword='localization',
+                                  gpu=True,
+                                  pattern=r'_3C_(.+?)nM_corrected', # r'degen100nM_([A-Za-z])_',
+                                  search_radius=2, gradient=1000)

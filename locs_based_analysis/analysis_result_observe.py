@@ -7,6 +7,7 @@ from picasso.io import save_locs, load_locs
 from scipy.spatial import KDTree
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.neighbors import NearestNeighbors
 
 
 def export_locs_PYMEVis(ref_hdf5_path, index, movie_list, pattern, gpu=True, box_size=1.5):
@@ -109,100 +110,165 @@ def export_locs_picasso(ref_hdf5_path, index, movie_list, gpu=True, box_size=2):
 #                                                     931, 979, 1015, 1022, 1045,
 #                                                     1263, 1264, 1378, 1490, 1541, 1690, 1871, 473], movie_list=movie_list, box_size=2)
 
+def co_localization_rate(ref_path, anneal_path, box_size=2):
+    ref_locs, _ = load_locs(ref_path)
+    anneal_locs, _ = load_locs(anneal_path)
 
-def nucleotide_selection_non_competitive(path, correct_pick=None, maximum_high_counts=1000,
-                                         minimum_diff=200):
-    counts = pd.read_csv(path, index_col=0)
-
-    counts = counts.loc[np.any(counts, axis=1)]
-
-    b1 = counts.max(axis=1) < maximum_high_counts
-    filtered_counts = counts.loc[b1.values, :].copy()
-
-    second_largest = filtered_counts.apply(lambda row: row.nlargest(2).iloc[-1], axis=1)
-
-    diff = filtered_counts.max(axis=1) - second_largest
-    b2 = diff > minimum_diff
-    # filtered_counts['diff'] = diff
-
-    filtered_counts = filtered_counts.loc[b2.values, :]
-
-    result = filtered_counts.idxmax(axis=1)
-
-    if correct_pick is None:
-        print(result)
-        return
-
-    else:
-        total_num = result.sum()
-        correct_pick_num = result.loc[correct_pick]
-        accuracy_rate = correct_pick_num / total_num
-
-        return accuracy_rate, total_num
+    ref_locs = pd.DataFrame(ref_locs)
+    anneal_locs = pd.DataFrame(anneal_locs)
 
 
-# nucleotide_selection_non_competitive("H:/non_competitive/20250325_8nt_Noncomp_GAP_T/corrected_movies/"
-#                                      "8nt_Noncomp_GAP_T_GAP_T_localization_corrected_neighbour_counting.csv")
+    print(len(ref_locs))
+    print(len(anneal_locs))
 
+    ref_coords = ref_locs[['x', 'y']].to_numpy()
+    anneal_coords = anneal_locs[['x', 'y']].to_numpy()
 
+    # nn = NearestNeighbors(n_neighbors=1, algorithm='auto').fit(anneal_coords)
+    #
+    # # Find the nearest neighbor in B for each point in A
+    # distances, indices = nn.kneighbors(ref_coords)
+    # #print(distances.shape)
+    #
+    # rate = np.sum(distances <= box_size) / len(ref_coords)
+    # print(rate)
 
-def nucleotide_selection_competitive(path, correct_pick=None):
-    complementary_nuc = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+    tree = KDTree(anneal_coords)
+    # Query neighbors within the given radius
+    indices = tree.query_ball_point(ref_coords, box_size)
 
-    counts = pd.read_csv(path, index_col=0, header=[0, 1])
-    linked = counts['linked']
-    regular = counts['regular']
+    neighbor_counts = [len(neigh) for neigh in indices]
+    neighbour_exist = [x for x in neighbor_counts if x > 0]
 
-    b = np.sum(regular > 1000, axis=1) == 0
-    regular = regular.loc[b]
-    linked = linked.loc[b]
-
-    b = np.sum(linked > 5, axis=1) >= 3
-    regular = regular.loc[b]
-    linked = linked.loc[b]
-
-    c_regular = regular.idxmin(axis=1)
-    c_linked = linked.idxmin(axis=1)
-    b = c_regular == c_linked
-    regular = regular.loc[b]
-    linked = linked.loc[b]
-
-    choice = regular.idxmin(axis=1)
-    choice = choice.replace(complementary_nuc)
-    print(choice.value_counts())
-
-
-    if correct_pick is not None:
-        second_minimum = regular.apply(lambda row: row.nlargest(3).iloc[-1], axis=1)
-        diff = second_minimum - regular.min(axis=1)
-
-        rate_list = []
-        total_num_list = []
-        for threshold in np.arange(0, 200, 5):
-            filtered = regular.loc[diff >= threshold]
-
-            choice = filtered.idxmin(axis=1)
-            choice = choice.replace(complementary_nuc)
-            choice = choice.value_counts()
-            # print(threshold)
-            # print(choice)
-
-            correct_pick_num = choice.loc[correct_pick]
-            total_num = choice.sum()
-            rate = correct_pick_num / total_num
-            rate_list.append(rate)
-            total_num_list.append(total_num)
-
-        plt.plot(np.arange(0, 200, 5), rate_list, '-o')
-        plt.show()
-
-        plt.plot(np.arange(0, 200, 5), total_num_list, '-o')
-        plt.show()
+    co_local_rate = len(neighbour_exist) / len(ref_coords)
+    print(co_local_rate)
 
     return
 
 
+# co_localization_rate(ref_path="G:/co-localization_rate/20250603_8ntGP_insitu/8ntGP_insitu_GAP_G_localization_corrected-1_locs.hdf5",
+#                      anneal_path="G:/co-localization_rate/20250603_8ntGP_insitu/8ntGP_insitu_GAP_G_reanellaed_corrected-1_locs.hdf5")
 
-nucleotide_selection_competitive("G:/CAP binding/20250427_Gseq1base_CAPbinding2nd/"
-                "Gseq1base_CAPbinding2nd_CAP_localization_corrected_picasso_bboxes_neighbour_counting_radius2_linked_g1000.csv",
-                                 correct_pick='T')
+
+from scipy.stats import gaussian_kde
+from sklearn.preprocessing import MinMaxScaler
+
+def first_index_with_all_following_below(nums, threshold):
+    candidate_idx = -1
+    max_after = -float('inf')  # Tracks the maximum number after current index
+
+    for i in range(len(nums) - 1, -1, -1):  # Iterate backward
+        num = nums[i]
+        if num >= threshold:
+            max_after = num
+        elif max_after < threshold:
+            candidate_idx = i  # Update candidate index if everything after is < threshold
+
+    # Edge case: If all numbers after index 0 are < threshold, return 0
+    if candidate_idx == -1 and nums and nums[0] >= threshold:
+        return 0
+    return candidate_idx if candidate_idx != -1 else None
+
+
+
+def competitive_selection(param, threshold):
+    b = np.sum(param.to_numpy() > threshold, axis=1)
+    b = b >= 3
+    param = param.loc[b]
+
+    choice = param.idxmin(axis=1)
+
+    sorted = param.to_numpy()
+    sorted.sort(axis=1)
+    diff = sorted[:, 1] - sorted[:, 0]
+    diff = diff / diff.max()
+
+    return choice, diff
+
+
+def non_competitive_selection(param, threshold):
+    b = np.sum(param.to_numpy() > threshold, axis=1)
+    b = b >= 1
+    param = param.loc[b]
+
+    choice = param.idxmax(axis=1)
+
+    sorted = param.to_numpy()
+    sorted.sort(axis=1)
+    diff = sorted[:, -1] - sorted[:, -2] # the difference between largest number and second largest
+    diff = diff / diff.max()
+
+    return choice, diff
+
+
+def base_calling(path, correct_pick, gradient_threshold=0.05, bin_width=10,
+                 maximum_length=1000, competitive=False):
+    param = pd.read_csv(path, index_col=0, header=[0, 1])
+    param = param['regular']
+    #remove fiducial markers
+    param = param.loc[param.max(axis=1) < maximum_length]
+
+    # ----------------- threshold selection ------------------------------
+    locs_counts = param.to_numpy().flatten()
+    position = np.arange(0, max(locs_counts) + bin_width, bin_width)
+    # plt.hist(locs_counts, bins=position)
+    # plt.show()
+
+    kernel = gaussian_kde(locs_counts)
+    density = kernel(position)
+    density = MinMaxScaler((0, 1000)).fit_transform(density.reshape(-1, 1)).flatten()
+
+    first_deriv = np.gradient(density, position)
+    second_deriv = np.gradient(first_deriv, position)
+
+    # plt.plot(position, density)
+    # plt.show()
+    # plt.plot(position, first_deriv)
+    # plt.show()
+    # plt.plot(position, second_deriv)
+    # plt.show()
+
+    transition_point_idx = first_index_with_all_following_below(second_deriv, gradient_threshold)
+    transition_point = position[transition_point_idx]
+    print(transition_point)
+
+
+    # ----------------- confidence VS accuracy rate plot -------------------
+    if competitive == True:
+        choice, diff = competitive_selection(param, transition_point)
+    else:
+        choice, diff = non_competitive_selection(param, transition_point)
+
+    thresholds = []
+    accuracy_rate = []
+    molecule_number = []
+    for t in np.arange(0, 1, 0.1):
+        selected_choice = choice.loc[diff > t]
+        if len(selected_choice) == 0:
+            break
+        else:
+            summary = selected_choice.value_counts()
+            if correct_pick in summary.index:
+                rate = summary.loc[correct_pick] / np.sum(summary)
+                accuracy_rate.append(rate)
+            else:
+                accuracy_rate.append(0)
+
+            thresholds.append(t)
+            molecule_number.append(len(selected_choice))
+
+    plt.plot(thresholds, accuracy_rate, '-o')
+    plt.show()
+
+    plt.plot(thresholds, molecule_number, '-o')
+    plt.show()
+
+
+    return
+
+
+base_calling("G:/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes_neighbour_counting_radius2_linked.csv",
+            correct_pick='A')
+
+# base_calling("G:/8nt_comp_GAP_G_GAP_G_localization_corrected_boxsize5_neighbour_counting_radius2_linked_paper.csv",
+#              competitive=True, correct_pick='C')
