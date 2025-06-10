@@ -9,73 +9,26 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.neighbors import NearestNeighbors
 
-
-def export_locs_PYMEVis(ref_hdf5_path, index, movie_list, pattern, gpu=True, box_size=1.5):
-    ref_locs, _ = load_locs(ref_hdf5_path)
-    ref_locs = pd.DataFrame(ref_locs)
-    ref_coords = ref_locs.loc[index, ['x', 'y']]
-
-    roi = [0, 428, 684, 856]
-
-    locs_list = []
-    for movie_path in movie_list:
-        nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
-
-        mov = one_channel_movie(movie_path, roi=roi)
-        mov.lq_fitting(gpu, min_net_gradient=1000, box=5)
-        mov.overlap_prevent(box_radius=box_size)
-
-        locs = pd.DataFrame(mov.locs)
-        mov_coords = locs[['x', 'y']]
-
-        # Build KDTree for fast neighbor lookup
-        tree = KDTree(mov_coords)
-
-        # Query neighbors within the given radius
-        indices = tree.query_ball_point(ref_coords, box_size)
-
-        selected_locs = pd.DataFrame(locs.loc[indices])
-        selected_locs['probe'] = nuc
-
-        locs_list.append(selected_locs)
-
-
-    df = pd.concat(locs_list, axis=0)
-    df['x'] = df['x'] - (df['x'].min() - 0.1)
-    df['y'] = df['y'] - (df['y'].min() - 0.1)
-
-    df[['x', 'y', 'lpx', 'lpy', 'sx', 'sy']] = df[['x', 'y', 'lpx', 'lpy', 'sx', 'sy']] * 117
-    df['sig'] = np.sqrt(np.square(df['sx']) + np.square(df['sy']))
-
-    df.drop(columns=['sx', 'sy'], inplace=True)
-    df.rename(columns={'frame': 't', 'photons': 'A', 'lpx': 'error_x', 'lpy': 'error_y'}, inplace=True)
-
-    # df['probe'] = df['probe'].apply(lambda x: x.replace('P', ''))
-    # df['probe'] = df['probe'].astype(int)
-
-    nuc_number = {'A': 1, 'T': 2, 'C': 3, 'G': 4}
-    df['probe'] = df['probe'].map(nuc_number)
-
-    df.to_csv(os.path.dirname(ref_hdf5_path) + '/{}.csv'.format(index), index=False)
-
-    return
-
-
-
 def export_locs_picasso(ref_hdf5_path, index, movie_list, gpu=True, box_size=2):
     ref_locs, _ = load_locs(ref_hdf5_path)
     ref_locs = ref_locs.view(np.recarray)
     ref_coords = ref_locs[index]
     ref_coords = np.column_stack((ref_coords.x, ref_coords.y))
 
-
     roi = [0, 428, 684, 856]
 
     for movie_path in movie_list:
-        mov = one_channel_movie(movie_path, roi=roi)
-        mov.lq_fitting(gpu, min_net_gradient=1000, box=5)
+        if movie_path.endswith('.tif'):
+            mov = one_channel_movie(movie_path, roi=roi)
+            mov.lq_fitting(gpu, min_net_gradient=1000, box=5)
+            mov_coords = np.column_stack((mov.locs['x'], mov.locs['y']))
 
-        mov_coords = np.column_stack((mov.locs['x'], mov.locs['y']))
+        elif movie_path.endswith('.hdf5'):
+            mov_locs, _ = load_locs(movie_path)
+            mov_coords = np.column_stack((mov_locs['x'], mov_locs['y']))
+            
+        else:
+            raise NotImplementedError
 
         # Build KDTree for fast neighbor lookup
         tree = KDTree(mov_coords)
@@ -98,8 +51,6 @@ def export_locs_picasso(ref_hdf5_path, index, movie_list, gpu=True, box_size=2):
     return
 
 
-
-
 # dir_path = 'H:\competitive/20250325_8nt_comp_GAP_G'
 # hdf5_path = "H:\competitive/20250325_8nt_comp_GAP_G\8nt_comp_GAP_G_GAP_G_localization_corrected.hdf5"
 #
@@ -110,6 +61,7 @@ def export_locs_picasso(ref_hdf5_path, index, movie_list, gpu=True, box_size=2):
 #                                                     931, 979, 1015, 1022, 1045,
 #                                                     1263, 1264, 1378, 1490, 1541, 1690, 1871, 473], movie_list=movie_list, box_size=2)
 
+
 def co_localization_rate(ref_path, anneal_path, box_size=2):
     ref_locs, _ = load_locs(ref_path)
     anneal_locs, _ = load_locs(anneal_path)
@@ -117,21 +69,11 @@ def co_localization_rate(ref_path, anneal_path, box_size=2):
     ref_locs = pd.DataFrame(ref_locs)
     anneal_locs = pd.DataFrame(anneal_locs)
 
-
     print(len(ref_locs))
     print(len(anneal_locs))
 
     ref_coords = ref_locs[['x', 'y']].to_numpy()
     anneal_coords = anneal_locs[['x', 'y']].to_numpy()
-
-    # nn = NearestNeighbors(n_neighbors=1, algorithm='auto').fit(anneal_coords)
-    #
-    # # Find the nearest neighbor in B for each point in A
-    # distances, indices = nn.kneighbors(ref_coords)
-    # #print(distances.shape)
-    #
-    # rate = np.sum(distances <= box_size) / len(ref_coords)
-    # print(rate)
 
     tree = KDTree(anneal_coords)
     # Query neighbors within the given radius
@@ -146,8 +88,8 @@ def co_localization_rate(ref_path, anneal_path, box_size=2):
     return
 
 
-# co_localization_rate(ref_path="G:/co-localization_rate/20250603_8ntGP_insitu/8ntGP_insitu_GAP_G_localization_corrected-1_locs.hdf5",
-#                      anneal_path="G:/co-localization_rate/20250603_8ntGP_insitu/8ntGP_insitu_GAP_G_reanellaed_corrected-1_locs.hdf5")
+co_localization_rate(ref_path="G:/co-localization_rate/20250608_CAPbinding_Af647_1nM/CAPbinding_Af647_1nM_CAP_localization-1_locs.hdf5",
+                  anneal_path="G:/co-localization_rate/20250608_CAPbinding_Af647_1nM/CAPbinding_Af647_1nM_CAP_degen200nM_reannealed-1_locs.hdf5")
 
 
 from scipy.stats import gaussian_kde
@@ -228,7 +170,7 @@ def base_calling(path, correct_pick, gradient_threshold=0.05, bin_width=10,
     # plt.plot(position, second_deriv)
     # plt.show()
 
-    transition_point_idx = first_index_with_all_following_below(second_deriv, gradient_threshold)
+    transition_point_idx = first_index_with_all_following_below(np.abs(second_deriv), gradient_threshold)
     transition_point = position[transition_point_idx]
     print(transition_point)
 
@@ -267,8 +209,8 @@ def base_calling(path, correct_pick, gradient_threshold=0.05, bin_width=10,
     return
 
 
-base_calling("G:/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes_neighbour_counting_radius2_linked.csv",
-            correct_pick='A')
+# base_calling("G:/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes_neighbour_counting_radius2_linked.csv",
+#             correct_pick='A')
 
 # base_calling("G:/8nt_comp_GAP_G_GAP_G_localization_corrected_boxsize5_neighbour_counting_radius2_linked_paper.csv",
 #              competitive=True, correct_pick='C')
