@@ -6,8 +6,9 @@ from picasso_utils import one_channel_movie
 from picasso.io import save_locs, load_locs
 from scipy.spatial import KDTree
 import matplotlib.pyplot as plt
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.neighbors import NearestNeighbors
+from sklearn.preprocessing import MinMaxScaler
+import warnings
+
 
 def export_locs_picasso(ref_hdf5_path, index, movie_list, gpu=True, box_size=2):
     ref_locs, _ = load_locs(ref_hdf5_path)
@@ -26,7 +27,7 @@ def export_locs_picasso(ref_hdf5_path, index, movie_list, gpu=True, box_size=2):
         elif movie_path.endswith('.hdf5'):
             mov_locs, _ = load_locs(movie_path)
             mov_coords = np.column_stack((mov_locs['x'], mov_locs['y']))
-            
+
         else:
             raise NotImplementedError
 
@@ -88,29 +89,31 @@ def co_localization_rate(ref_path, anneal_path, box_size=2):
     return
 
 
-co_localization_rate(ref_path="G:/co-localization_rate/20250608_CAPbinding_Af647_1nM/CAPbinding_Af647_1nM_CAP_localization-1_locs.hdf5",
-                  anneal_path="G:/co-localization_rate/20250608_CAPbinding_Af647_1nM/CAPbinding_Af647_1nM_CAP_degen200nM_reannealed-1_locs.hdf5")
+# co_localization_rate(ref_path="G:/co-localization_rate/20250608_CAPbinding_Af647_1nM/CAPbinding_Af647_1nM_CAP_localization-1_locs.hdf5",
+#                   anneal_path="G:/co-localization_rate/20250608_CAPbinding_Af647_1nM/CAPbinding_Af647_1nM_CAP_degen200nM_reannealed-1_locs.hdf5")
 
 
 from scipy.stats import gaussian_kde
 from sklearn.preprocessing import MinMaxScaler
 
-def first_index_with_all_following_below(nums, threshold):
-    candidate_idx = -1
-    max_after = -float('inf')  # Tracks the maximum number after current index
+def first_index_with_all_following_below(values, threshold):
+    b = values < threshold
+    start = 0
+    end = len(values) - 1
+    result = len(values) - 1
 
-    for i in range(len(nums) - 1, -1, -1):  # Iterate backward
-        num = nums[i]
-        if num >= threshold:
-            max_after = num
-        elif max_after < threshold:
-            candidate_idx = i  # Update candidate index if everything after is < threshold
+    while start < end:
+        middle = (start + end) // 2
+        if np.all(b[middle:]):
+            result = middle
+            end = middle - 1
+        else:
+            start = middle + 1
 
-    # Edge case: If all numbers after index 0 are < threshold, return 0
-    if candidate_idx == -1 and nums and nums[0] >= threshold:
-        return 0
-    return candidate_idx if candidate_idx != -1 else None
+    if result == len(values) - 1:
+        raise ValueError("gradient threshold is too low")
 
+    return result
 
 
 def competitive_selection(param, threshold):
@@ -143,10 +146,9 @@ def non_competitive_selection(param, threshold):
     return choice, diff
 
 
-def base_calling(path, correct_pick, gradient_threshold=0.05, bin_width=10,
-                 maximum_length=1000, competitive=False):
-    param = pd.read_csv(path, index_col=0, header=[0, 1])
-    param = param['regular']
+def base_calling(path, correct_pick=None, gradient_threshold=0.05, bin_width=10,
+                 maximum_length=1000, exp_type='competitive', display=False):
+    param = pd.read_csv(path, index_col=0)
     #remove fiducial markers
     param = param.loc[param.max(axis=1) < maximum_length]
 
@@ -163,54 +165,100 @@ def base_calling(path, correct_pick, gradient_threshold=0.05, bin_width=10,
     first_deriv = np.gradient(density, position)
     second_deriv = np.gradient(first_deriv, position)
 
-    # plt.plot(position, density)
-    # plt.show()
-    # plt.plot(position, first_deriv)
-    # plt.show()
-    # plt.plot(position, second_deriv)
-    # plt.show()
-
     transition_point_idx = first_index_with_all_following_below(np.abs(second_deriv), gradient_threshold)
     transition_point = position[transition_point_idx]
     print(transition_point)
 
 
     # ----------------- confidence VS accuracy rate plot -------------------
-    if competitive == True:
+    if exp_type == 'competitive':
         choice, diff = competitive_selection(param, transition_point)
-    else:
+    elif exp_type == 'non_competitive':
         choice, diff = non_competitive_selection(param, transition_point)
+    else:
+        raise ValueError
 
-    thresholds = []
-    accuracy_rate = []
-    molecule_number = []
-    for t in np.arange(0, 1, 0.1):
-        selected_choice = choice.loc[diff > t]
-        if len(selected_choice) == 0:
-            break
-        else:
-            summary = selected_choice.value_counts()
-            if correct_pick in summary.index:
-                rate = summary.loc[correct_pick] / np.sum(summary)
-                accuracy_rate.append(rate)
+    if display and isinstance(correct_pick, str):
+        fig, ax = plt.subplots(2, 2)
+        ax[0, 0].plot(position, density, label='scaled density')
+        ax[0, 1].plot(position, second_deriv, label='second derivative')
+
+        thresholds = []
+        accuracy_rate = []
+        molecule_number = []
+        for t in np.arange(0, 1, 0.1):
+            selected_choice = choice.loc[diff > t]
+            if len(selected_choice) == 0:
+                break
             else:
-                accuracy_rate.append(0)
+                summary = selected_choice.value_counts()
+                if correct_pick in summary.index:
+                    rate = summary.loc[correct_pick] / summary.sum()
+                    accuracy_rate.append(rate)
+                else:
+                    accuracy_rate.append(0)
 
-            thresholds.append(t)
-            molecule_number.append(len(selected_choice))
+                thresholds.append(t)
+                molecule_number.append(len(selected_choice))
 
-    plt.plot(thresholds, accuracy_rate, '-o')
+        ax[1, 0].plot(thresholds, accuracy_rate, '-o', label='accuracy rate')
+        ax[1, 1].plot(thresholds, molecule_number, '-o', label='molecular number')
+        plt.legend(loc='best')
+        plt.show()
+
+
+
+    return pd.DataFrame({'choice': choice, 'diff': diff})
+
+
+
+# base_calling("G:/time_vs_accoracy/csv_files/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes_neighbour_counting_radius2_200.csv",
+#              exp_type='non_competitive',  correct_pick='A', display=True)
+
+
+def time_VS_accuracy(dir_path, correct_pick, confidence, exp_type='non_competitive'):
+    files = [x for x in os.listdir(dir_path) if x.endswith('.csv')]
+
+    frame_num = []
+    accuracy_rate = []
+    molecule_num = []
+    for f in files:
+        num = f.split('.')[0]
+        num = num.split('_')[-1]
+        if num.isdigit():
+            result = base_calling(os.path.join(dir_path, f), exp_type=exp_type)
+            frame_num.append(int(num))
+
+            result = result[result['diff'] > confidence]
+            summary = result['choice'].value_counts()
+
+            number = summary.sum()
+            molecule_num.append(number)
+            accuracy_rate.append(summary.loc[correct_pick] / number)
+        else:
+            warnings.warn("detected other types of csv file")
+            continue
+
+
+
+    fig, ax = plt.subplots(2, 1, )
+    ax[0].plot(frame_num, accuracy_rate, 'o')
+    ax[0].title.set_text('accuracy rate')
+    ax[0].set_xlabel('frame')
+    ax[0].set_ylabel('accuracy')
+
+    ax[1].plot(frame_num, molecule_num, 'o')
+    ax[1].title.set_text('molecular number')
+    ax[1].set_xlabel('frame')
+    ax[1].set_ylabel('molecular number')
+
+    fig.tight_layout()
     plt.show()
 
-    plt.plot(thresholds, molecule_number, '-o')
-    plt.show()
-
-
+    df = pd.DataFrame({'frame': frame_num, 'accuracy': accuracy_rate, 'molecule_number': molecule_num})
+    df.sort_values('frame', inplace=True)
+    df.to_csv(os.path.join(dir_path, 'frame_vs_accuracy_rate.csv'))
     return
 
 
-# base_calling("G:/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes_neighbour_counting_radius2_linked.csv",
-#             correct_pick='A')
-
-# base_calling("G:/8nt_comp_GAP_G_GAP_G_localization_corrected_boxsize5_neighbour_counting_radius2_linked_paper.csv",
-#              competitive=True, correct_pick='C')
+time_VS_accuracy("G:/time_vs_accoracy/csv_files", correct_pick='A', confidence=0.4)
