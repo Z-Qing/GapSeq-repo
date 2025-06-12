@@ -12,14 +12,14 @@ from scipy.spatial import KDTree
 from scipy.ndimage import uniform_filter, shift
 import numpy as np
 from numpy.lib import recfunctions as rfn
-import ruptures as rpt
-import multiprocessing
+# import ruptures as rpt
+# import multiprocessing
 import matplotlib.pyplot as plt
 
 
 
 class one_channel_movie(object):
-    def __init__(self, movie, roi=None, frame_range=None):
+    def __init__(self, movie, roi=None, frame_range=np.inf):
         if isinstance(movie, str):
             self.movie_path = movie
             self.movie = None
@@ -44,7 +44,7 @@ class one_channel_movie(object):
         self.camera_info = {}
 
         self.locs = None
-        self.cluster_param = None
+        #self.cluster_param = None
 
     def __getitem__(self, index):
         return self.movie[index]
@@ -61,15 +61,15 @@ class one_channel_movie(object):
                 info[0]['Width'] = self.roi[3] - self.roi[1]
                 info[0]['Height'] = self.roi[2] - self.roi[0]
 
+
             # change the frame range if it is not None
-            if self.frame_range is not None:
+            if self.frame_range is not np.inf:
                 if isinstance(self.frame_range, (list, tuple)):
                     movie = movie[self.frame_range[0]: self.frame_range[1], :, :]
                     info[0]['Frames'] = self.frame_range[1] - self.frame_range[0]
 
                 if isinstance(self.frame_range, int):
-                    movie = movie[self.frame_range, :, :]
-                    movie = movie[np.newaxis, :, :]
+                    movie = movie[:self.frame_range, :, :]
                     info[0]['Frames'] = 1
 
                 else:
@@ -251,70 +251,68 @@ class one_channel_movie(object):
         return
 
 
-    @staticmethod
-    def get_binding_event_num(trace, index, penalty=5, min_size=10, min_intensity_increase=100,
-                              display=False):
-        algo = rpt.KernelCPD(kernel='rbf', min_size=min_size).fit(trace)
-        bkps = algo.predict(pen=penalty)
-        bkps = np.insert(bkps, 0, 0)
-
-        starts = bkps[:-1]
-        ends = bkps[1:]
-
-        intensities = np.array([np.mean(trace[start + 1: end - 1]) for start, end in zip(starts, ends)])
-
-
-        if display:
-            plt.plot(np.arange(len(trace)), trace)
-            plt.vlines(bkps, ymin=min(trace), ymax=max(trace), colors='black', linestyles='dashed')
-            plt.title(index)
-            print(intensities)
-            print(np.sum(intensities > min_intensity_increase))
-            plt.show()
-
-        binding_event_num = np.sum(intensities > min_intensity_increase)
-
-        return binding_event_num, index
-
-
-
-
-
-    def trace_analysis(self, box_size=3, display=False):
-
-        if self.cluster_param is None:
-            raise ValueError('Please run dbscan first')
-        else:
-            pos = np.round(self.cluster_param[['x', 'y']]).astype(int).to_numpy()
-
-        # extract intensity traces
-        smoothed = uniform_filter(self.movie, size=(0, box_size, box_size), mode='nearest')
-
-        pos_indices = []
-        intensities = np.zeros((len(pos), self.movie.shape[0]))
-        for i, (x, y) in enumerate(pos):
-            intensities[i, :] = smoothed[:, y, x]
-            pos_indices.append(i)
-
-        # change point detection
-
-        index_eventNum = []
-        if display:
-            random_ind_list = np.arange(len(pos))
-            np.random.shuffle(random_ind_list)
-            for i in random_ind_list:
-                even_num, i = self.get_binding_event_num(intensities[i, :], pos_indices[i], display=display)
-                index_eventNum.append([i, even_num])
-
-        else:
-            data_with_indices = zip(intensities, pos_indices)
-            with multiprocessing.Pool() as pool:
-                for event_num, i in pool.starmap(self.get_binding_event_num, data_with_indices):
-                     index_eventNum.append([i, event_num])
-
-        index_eventNum = np.array(index_eventNum)
-        self.cluster_param.loc[index_eventNum[:, 0], 'event_num'] = index_eventNum[:, 1]
-
-
-        return
+    # @staticmethod
+    # def get_binding_event_num(trace, index, penalty=5, min_size=10, min_intensity_increase=100,
+    #                           display=False):
+    #     algo = rpt.KernelCPD(kernel='rbf', min_size=min_size).fit(trace)
+    #     bkps = algo.predict(pen=penalty)
+    #     bkps = np.insert(bkps, 0, 0)
+    #
+    #     starts = bkps[:-1]
+    #     ends = bkps[1:]
+    #
+    #     intensities = np.array([np.mean(trace[start + 1: end - 1]) for start, end in zip(starts, ends)])
+    #
+    #
+    #     if display:
+    #         plt.plot(np.arange(len(trace)), trace)
+    #         plt.vlines(bkps, ymin=min(trace), ymax=max(trace), colors='black', linestyles='dashed')
+    #         plt.title(index)
+    #         print(intensities)
+    #         print(np.sum(intensities > min_intensity_increase))
+    #         plt.show()
+    #
+    #     binding_event_num = np.sum(intensities > min_intensity_increase)
+    #
+    #     return binding_event_num, index
+    #
+    #
+    #
+    # def trace_analysis(self, box_size=3, display=False):
+    #
+    #     if self.cluster_param is None:
+    #         raise ValueError('Please run dbscan first')
+    #     else:
+    #         pos = np.round(self.cluster_param[['x', 'y']]).astype(int).to_numpy()
+    #
+    #     # extract intensity traces
+    #     smoothed = uniform_filter(self.movie, size=(0, box_size, box_size), mode='nearest')
+    #
+    #     pos_indices = []
+    #     intensities = np.zeros((len(pos), self.movie.shape[0]))
+    #     for i, (x, y) in enumerate(pos):
+    #         intensities[i, :] = smoothed[:, y, x]
+    #         pos_indices.append(i)
+    #
+    #     # change point detection
+    #
+    #     index_eventNum = []
+    #     if display:
+    #         random_ind_list = np.arange(len(pos))
+    #         np.random.shuffle(random_ind_list)
+    #         for i in random_ind_list:
+    #             even_num, i = self.get_binding_event_num(intensities[i, :], pos_indices[i], display=display)
+    #             index_eventNum.append([i, even_num])
+    #
+    #     else:
+    #         data_with_indices = zip(intensities, pos_indices)
+    #         with multiprocessing.Pool() as pool:
+    #             for event_num, i in pool.starmap(self.get_binding_event_num, data_with_indices):
+    #                  index_eventNum.append([i, event_num])
+    #
+    #     index_eventNum = np.array(index_eventNum)
+    #     self.cluster_param.loc[index_eventNum[:, 0], 'event_num'] = index_eventNum[:, 1]
+    #
+    #
+    #     return
 
