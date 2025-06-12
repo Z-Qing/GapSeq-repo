@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from numpy.ma.core import max_filler
 from picasso.io import save_locs, load_locs
 import re
 import os
@@ -32,7 +33,8 @@ def neighbour_counting(ref_points, mov_points, nuc, box_radius=1.5):
 
 
 
-def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2, mov_gradient=1000,
+def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
+                                   mov_gradient=1000, max_frame=np.inf,
                                    gpu=True, ref_roi=None, ref_gradient=400, roi=None, save_hdf5=False):
     if ref_path.endswith('.hdf5'):
         ref_locs, _ = load_locs(ref_path)
@@ -51,42 +53,42 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
     nuc_locs = {}
     nuc_info = {}
     for movie_path in mov_list:
-        mov = one_channel_movie(movie_path, roi=roi)
-        mov.lq_fitting(gpu, min_net_gradient=mov_gradient, box=5)
         nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
+        if movie_path.endswith('.hdf5'):
+            locs, info = load_locs(movie_path)
+            locs = locs[locs.frame < max_frame]
+            nuc_locs[nuc] = locs
+            nuc_info[nuc] = info
 
-        nuc_info[nuc] = mov.info
-        nuc_locs[nuc] = mov.locs
+        elif movie_path.endswith('.tif'):
+            mov = one_channel_movie(movie_path, roi=roi, frame_range=max_frame)
+            mov.lq_fitting(gpu, min_net_gradient=mov_gradient, box=5)
 
-        if save_hdf5:
-            save_locs(movie_path.replace('.tif', '.hdf5'), mov.locs, mov.info)
+            nuc_info[nuc] = mov.info
+            nuc_locs[nuc] = mov.locs
+
+            if save_hdf5:
+                save_locs(movie_path.replace('.tif', '.hdf5'), mov.locs, mov.info)
+
+        else:
+            raise NotImplementedError
 
     # ----------------------- neighbour counting ----------------------
     total_params = []
-    total_linked_params = []
     for nuc in nuc_locs.keys():
         param = neighbour_counting(ref_locs, nuc_locs[nuc], nuc, box_radius=search_radius)
         total_params.append(param)
 
-        linked_locs = link(nuc_locs[nuc], nuc_info[nuc], max_dark_time=1, r_max=1)
-        linked_param = neighbour_counting(ref_locs, linked_locs, nuc, box_radius=search_radius)
-        total_linked_params.append(linked_param)
-
-    total_params = pd.concat(total_params, axis=1)
-    total_params.columns = pd.MultiIndex.from_product([['regular'], total_params.columns])
-
-    total_linked_params = pd.concat(total_linked_params, axis=1)
-    total_linked_params.columns = pd.MultiIndex.from_product([['linked'], total_linked_params.columns])
-
-    counting_params = pd.concat([total_params, total_linked_params], axis=1)
+    counting_params = pd.concat(total_params, axis=1)
 
     return counting_params
 
 
 
-def process_analysis_Localization(dir_path, pattern, ref_path=None, localization_keyword='localization',
-                                   search_radius=2, gradient=1000, gpu=True):
-    files = [x for x in os.listdir(dir_path) if x.endswith('.tif')]
+def process_analysis_Localization(dir_path, pattern, ref_path=None, target_format='.tif',
+                                  localization_keyword='localization', max_frame=np.inf,
+                                   search_radius=2, gradient=1000, gpu=True, save_hdf5=False):
+    files = [x for x in os.listdir(dir_path) if x.endswith(target_format)]
 
     if ref_path is None:
         ref = [x for x in files if localization_keyword in x]
@@ -94,19 +96,19 @@ def process_analysis_Localization(dir_path, pattern, ref_path=None, localization
             raise ValueError("There should be one and only one reference file in the directory")
         else:
             files.remove(ref[0])
-            ref_keyword = ref[0].replace('.tif', '')
+            ref_keyword = ref[0].replace(target_format, '')
         ref = os.path.join(dir_path, ref[0])
+        mov_list = [os.path.join(dir_path, x) for x in files if localization_keyword not in x]
+
     else:
         ref = ref_path
         ref_keyword = os.path.basename(ref_path).split('.')[0]
-
-
-    mov_list = [os.path.join(dir_path, x) for x in files if localization_keyword not in x]
+        mov_list = [os.path.join(dir_path, x) for x in files if ref_keyword.replace('_picasso_bboxes', '') not in x]
 
     counts = locs_based_analysis_preAligned(ref, mov_list, pattern=pattern, search_radius=search_radius, gpu=gpu,
-                                            roi=[0, 428, 684, 856], ref_roi=[0, 0, 684, 428],
-                                            ref_gradient=400, mov_gradient=gradient, save_hdf5=False)
-    counts.to_csv(dir_path + '/{}_neighbour_counting_radius{}_linked.csv'.format(ref_keyword, search_radius))
+                                            roi=[0, 428, 684, 856], ref_roi=[0, 0, 684, 428], max_frame=max_frame,
+                                            ref_gradient=400, mov_gradient=gradient, save_hdf5=save_hdf5)
+    counts.to_csv(dir_path + '/{}_neighbour_counting_radius{}_{}.csv'.format(ref_keyword, search_radius, max_frame))
 
 
     return
@@ -143,9 +145,12 @@ def process_analysis_ALEX(dir_path, search_radius=2, gradient=1000, gpu=True):
 
 if __name__ == "__main__":
     #process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
-    process_analysis_Localization("G:/temp",
-                                  ref_path="G:/temp/8nt_GAP_G_comp_complementarystand_GAP_G_localization_corrected_picasso_bboxes.hdf5",
+    process_analysis_Localization("G:/time_vs_accoracy",
+                                  ref_path="G:/time_vs_accoracy/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes.hdf5",
                                   localization_keyword='localization',
                                   gpu=True,
-                                  pattern=r'_3C_(.+?)nM_corrected', # r'degen100nM_([A-Za-z])_',
+                                  pattern=r'_seal3([A-Za-z])_', # r'degen100nM_([A-Za-z])_',
+                                  max_frame=200,
+                                  save_hdf5=False,
+                                  target_format='.hdf5',
                                   search_radius=2, gradient=1000)
