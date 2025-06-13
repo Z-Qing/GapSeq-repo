@@ -12,8 +12,6 @@ from scipy.spatial import KDTree
 from scipy.ndimage import uniform_filter, shift
 import numpy as np
 from numpy.lib import recfunctions as rfn
-# import ruptures as rpt
-# import multiprocessing
 import matplotlib.pyplot as plt
 
 
