@@ -239,8 +239,6 @@ def time_VS_accuracy(dir_path, correct_pick, confidence, exp_type='non_competiti
             warnings.warn("detected other types of csv file")
             continue
 
-
-
     fig, ax = plt.subplots(2, 1, )
     ax[0].plot(frame_num, accuracy_rate, 'o')
     ax[0].title.set_text('accuracy rate')
