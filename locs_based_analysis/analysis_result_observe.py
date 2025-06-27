@@ -89,8 +89,8 @@ def co_localization_rate(ref_path, anneal_path, box_size=2):
     return
 
 
-# co_localization_rate(ref_path="G:/co-localization_rate/20250608_CAPbinding_Af647_1nM/CAPbinding_Af647_1nM_CAP_localization-1_locs.hdf5",
-#                   anneal_path="G:/co-localization_rate/20250608_CAPbinding_Af647_1nM/CAPbinding_Af647_1nM_CAP_degen200nM_reannealed-1_locs.hdf5")
+co_localization_rate(ref_path="G:/Cap_library_24062025/20250624_CAP_1base_seqN/co_local_rate/CAP_1base_seqN_libary_localization_corrected_green_first_frame_locs.hdf5",
+                   anneal_path="G:/Cap_library_24062025/20250624_CAP_1base_seqN/co_local_rate/CAP_1base_seqN_CAP_reanneal_corrected_green_first_frame_locs.hdf5")
 
 
 from scipy.stats import gaussian_kde
@@ -114,6 +114,20 @@ def first_index_with_all_following_below(values, threshold):
         raise ValueError("gradient threshold is too low")
 
     return result
+
+
+def find_x_interaction(values):
+    zero_crossings = np.where(values == 0)[0].tolist()
+    # Check for sign changes
+    sign_changes = np.where(values[:-1] * values[1:] < 0)[0].tolist()
+
+    zero_crossings.extend(sign_changes)
+    zero_crossings = sorted(list(set(zero_crossings)))
+
+    if len(zero_crossings) <= 1:
+        raise ValueError("zero_crossings can't be found")
+
+    return zero_crossings[1]
 
 
 def competitive_selection(param, threshold):
@@ -166,6 +180,7 @@ def base_calling(path, correct_pick=None, gradient_threshold=0.05, bin_width=10,
     second_deriv = np.gradient(first_deriv, position)
 
     transition_point_idx = first_index_with_all_following_below(np.abs(second_deriv), gradient_threshold)
+    #transition_point_idx = find_x_interaction(second_deriv)
     transition_point = position[transition_point_idx]
     print(transition_point)
 
@@ -181,7 +196,8 @@ def base_calling(path, correct_pick=None, gradient_threshold=0.05, bin_width=10,
     if display and isinstance(correct_pick, str):
         fig, ax = plt.subplots(2, 2)
         ax[0, 0].plot(position, density, label='scaled density')
-        ax[0, 1].plot(position, second_deriv, label='second derivative')
+        ax[0, 1].plot(position, second_deriv,label='second derivative')
+        ax[0, 1].vlines(transition_point, min(second_deriv), max(second_deriv), colors='green', linestyles='dashed')
 
         thresholds = []
         accuracy_rate = []
@@ -204,7 +220,9 @@ def base_calling(path, correct_pick=None, gradient_threshold=0.05, bin_width=10,
         ax[1, 0].plot(thresholds, accuracy_rate, '-o', label='accuracy rate')
         ax[1, 1].plot(thresholds, molecule_number, '-o', label='molecular number')
         plt.legend(loc='best')
+        #plt.savefig('E:/Thesis/chapter4_GapSeq/figures/threshold determination/threshold_confidence.png', dpi=600)
         plt.show()
+
 
 
 
@@ -259,4 +277,4 @@ def time_VS_accuracy(dir_path, correct_pick, confidence, exp_type='non_competiti
     return
 
 
-time_VS_accuracy("G:/time_vs_accoracy/csv_files", correct_pick='A', confidence=0.4)
+#time_VS_accuracy("G:/time_vs_accoracy/csv_files", correct_pick='A', confidence=0.4)
