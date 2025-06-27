@@ -145,12 +145,12 @@ def process_analysis_ALEX(dir_path, search_radius=2, gradient=1000, gpu=True):
 
 if __name__ == "__main__":
     #process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
-    process_analysis_Localization("G:/time_vs_accoracy",
-                                  ref_path="G:/time_vs_accoracy/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes.hdf5",
-                                  localization_keyword='localization',
+    process_analysis_Localization("G:/Cap_library_24062025/20250624_CAP_1base_seqN",
+                                  ref_path="Z:/Qing_2/GAPSeq/CAP binding/20250624_CAP_1base_seqN/Median/CAP_1base_seqN_libary_localization_corrected_picasso_bboxes.hdf5",
+                                  localization_keyword='localization', # only used when ref_path is not provided
                                   gpu=True,
-                                  pattern=r'_seal3([A-Za-z])_', # r'degen100nM_([A-Za-z])_',
-                                  max_frame=200,
+                                  pattern=r'_S5([A-Za-z])', # r'degen100nM_([A-Za-z])_',
+                                  max_frame=np.inf,
                                   save_hdf5=False,
-                                  target_format='.hdf5',
+                                  target_format='.tif',
                                   search_radius=2, gradient=1000)
