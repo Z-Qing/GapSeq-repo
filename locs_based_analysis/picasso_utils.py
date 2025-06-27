@@ -1,38 +1,44 @@
 import pandas as pd
-from picasso.gausslq import locs_from_fits_gpufit, fit_spots_gpufit, fit_spots_parallel, locs_from_fits
+from picasso.gausslq import locs_from_fits_gpufit, fit_spots_parallel, locs_from_fits, fits_from_futures
 from picasso.io import load_movie
 from picasso.localize import identify_async, identifications_from_futures, get_spots
 from picasso.aim import aim
 from picasso.clusterer import dbscan
 from picasso.postprocess import link
-from picasso.lib import ensure_sanity
-import cupy as cp
-from cupyx.scipy.ndimage import shift as cupy_shift
+from picasso.lib import ensure_sanity, n_futures_done
 from scipy.spatial import KDTree
 from scipy.ndimage import uniform_filter, shift
 import numpy as np
 from numpy.lib import recfunctions as rfn
 import matplotlib.pyplot as plt
+import time
+
+try:
+    import cupy as cp
+    from cupyx.scipy.ndimage import shift as cupy_shift
+    from picasso.gausslq import fit_spots_gpufit
+except:
+    pass
 
 
 
 class one_channel_movie(object):
-    def __init__(self, movie, roi=None, frame_range=np.inf):
-        if isinstance(movie, str):
-            self.movie_path = movie
+    def __init__(self, mov, roi=None, frame_range=np.inf):
+        if isinstance(mov, str):
+            self.movie_path = mov
             self.movie = None
             self.info = None
 
-        elif isinstance(movie, np.ndarray):
-            self.movie = movie
+        elif isinstance(mov, np.ndarray):
+            self.movie = mov
             self.movie_path = None
             initial_dict = {'Byte Order': '<',
                             'Data Type': 'uint16',
                             'File': '',
-                            'Frames': movie.shape[0],
-                            'Height': movie.shape[1],
+                            'Frames': mov.shape[0],
+                            'Height': mov.shape[1],
                             'Micro-Manager Acquisiton Comments': '',
-                            'Width': movie.shape[2],}
+                            'Width': mov.shape[2],}
             self.info = [initial_dict]
         else:
             raise ValueError("movie must be a string (path to the movie file) or a numpy array")
@@ -50,7 +56,9 @@ class one_channel_movie(object):
     # this function is modified from the localize function in picasso.localize
     # and it exports the fitting quality as well
     def movie_format(self, baseline=400):
-        if self.movie_path is not None:
+        # print(self.movie_path)
+        # print(self.movie)
+        if self.movie_path is not None and self.movie is None:
             movie, info = load_movie(self.movie_path)
             # handle the roi before feeding it into the picasso functions
             if self.roi is not None:
@@ -66,7 +74,7 @@ class one_channel_movie(object):
                     movie = movie[self.frame_range[0]: self.frame_range[1], :, :]
                     info[0]['Frames'] = self.frame_range[1] - self.frame_range[0]
 
-                if isinstance(self.frame_range, int):
+                elif isinstance(self.frame_range, int):
                     movie = movie[:self.frame_range, :, :]
                     info[0]['Frames'] = 1
 
@@ -74,7 +82,7 @@ class one_channel_movie(object):
                     raise ValueError("frame_range must be a list/tuple for a range or"
                                      " an integer for a single frame")
 
-        elif self.movie is not None:
+        elif self.movie is not None and self.movie_path is None:
             movie = self.movie
             info = self.info
         else:
@@ -91,58 +99,41 @@ class one_channel_movie(object):
         return
 
 
-
-    # this function selects  and modifies a part of codes frm picasso.main
-    def lq_gpu_fitting(self, min_net_gradient, box):
-        camera_info = self.camera_info
-
-        current, futures = identify_async(self.movie, min_net_gradient, box, roi=None)
-        ids = identifications_from_futures(futures)
-
-        spots = get_spots(self.movie, ids, box, camera_info)
-        theta = fit_spots_gpufit(spots)
-        em = camera_info["Gain"] > 1
-        locs = locs_from_fits_gpufit(ids, theta, box, em)
-
-        self.locs = locs
-
-        return
-
-    def lq_cpu_fitting(self, min_net_gradient, box):
-        camera_info = self.camera_info
-
-        current, futures = identify_async(self.movie, min_net_gradient, box, roi=None)
-        ids = identifications_from_futures(futures)
-
-        spots = get_spots(self.movie, ids, box, camera_info)
-        theta = fit_spots_parallel(spots)
-        locs = locs_from_fits(ids, theta, box, camera_info["Gain"])
-
-        self.locs = locs
-
-        return
-
-    def lq_fitting(self, GPU, min_net_gradient=400, box=5):
+    def lq_fitting(self, GPU, gradient=400, box=5):
         if self.movie is None or self.info is None:
             self.movie_format()
 
+        curr, futures = identify_async(self.movie, gradient, box, roi=None)
+        # N = len(self.movie)
+        # while curr[0] < N:
+        #     time.sleep(0.2)
+        ids = identifications_from_futures(futures)
+        spots = get_spots(self.movie, ids, box, self.camera_info)
+        em = self.camera_info["Gain"] > 1
+
         if GPU:
-            self.lq_gpu_fitting(min_net_gradient, box)
+            theta = fit_spots_gpufit(spots)
+            locs = locs_from_fits_gpufit(ids, theta, box, em)
         else:
-            self.lq_cpu_fitting(min_net_gradient, box)
+            fs = fit_spots_parallel(spots, asynch=True)
+            # n_tasks = len(fs)
+            # while n_futures_done(fs) < n_tasks:
+            #     time.sleep(0.2)
+            theta = fits_from_futures(fs)
+            locs = locs_from_fits(ids, theta, box, em)
 
         localize_info = {
             "Generated by": "Picasso Localize",
             "ROI": None,
             "Box Size": box,
-            "Min. Net Gradient": min_net_gradient,
+            "Min. Net Gradient": gradient,
             "Convergence Criterion": 0,
             "Max. Iterations": 0,
             "Pixelsize": 117,
             "Fit method": 'lq'}
 
         self.info.append(localize_info)
-        self.locs = ensure_sanity(self.locs, self.info)
+        self.locs = ensure_sanity(locs, self.info)
 
         return
 
@@ -151,35 +142,35 @@ class one_channel_movie(object):
                          intersect_d=20 / 117, roi_r=60 / 117):
         # self.lq_gpu_fitting(min_net_gradient=min_net_gradient, box=box)
         # the movie will be set during the lq_gpu_fitting
-        if drift is None:
-            if max(self.locs['frame']) >= 3 * segmentation:
-                corrected_locs, new_info, drift = aim(self.locs, self.info,
-                            segmentation=segmentation, intersect_d=intersect_d, roi_r=roi_r)
+        if drift is None and max(self.locs.frame) >= 3 * segmentation:
+            corrected_locs, new_info, drift = aim(self.locs, self.info,
+                        segmentation=segmentation, intersect_d=intersect_d, roi_r=roi_r)
 
-                drift = drift.view(np.recarray)
-                self.locs = corrected_locs
-                self.info = new_info
-            else:
-                drift = np.zeros((len(self.locs), 2))
+            drift = drift.view(np.recarray)
+            self.locs = corrected_locs
+            self.info = new_info
+            # else:
+            #     drift = np.zeros((len(self.locs), 2))
 
-
-        if GPU:
+        if drift is not None:
+            if GPU:
                 # apply negative drift frame by frame using GPU
-            movie_gpu = cp.asarray(self.movie)
-            corrected_movie_gpu = cp.empty_like(movie_gpu)
-            for i in range(movie_gpu.shape[0]):
-                aim_shift = (-drift[i][1], -drift[i][0])
-                corrected_movie_gpu[i] = cupy_shift(movie_gpu[i], aim_shift, mode='constant', cval=0, order=1)
+                movie_gpu = cp.asarray(self.movie)
+                # print(movie_gpu.shape[0])
+                corrected_movie_gpu = cp.empty_like(movie_gpu)
+                for i in np.arange(movie_gpu.shape[0]):
+                    aim_shift = (-drift[i][1], -drift[i][0])
+                    corrected_movie_gpu[i] = cupy_shift(movie_gpu[i], aim_shift, mode='constant', cval=0, order=1)
 
-            corrected_movie = cp.asnumpy(corrected_movie_gpu)
+                corrected_movie = cp.asnumpy(corrected_movie_gpu)
 
-        else:
-            corrected_movie = np.empty_like(self.movie)
-            for i in range(self.movie.shape[0]):
-                aim_shift = (-drift[i][1], -drift[i][0])
-                corrected_movie[i] = shift(self.movie[i], aim_shift, mode='constant', cval=0, order=1)
+            else:
+                corrected_movie = np.empty_like(self.movie)
+                for i in range(self.movie.shape[0]):
+                    aim_shift = (-drift[i][1], -drift[i][0])
+                    corrected_movie[i] = shift(self.movie[i], aim_shift, mode='constant', cval=0, order=1)
 
-        self.movie = corrected_movie
+            self.movie = corrected_movie
 
         return drift
 
@@ -247,70 +238,3 @@ class one_channel_movie(object):
         self.locs = concatenated_locs.view(np.recarray)
 
         return
-
-
-    # @staticmethod
-    # def get_binding_event_num(trace, index, penalty=5, min_size=10, min_intensity_increase=100,
-    #                           display=False):
-    #     algo = rpt.KernelCPD(kernel='rbf', min_size=min_size).fit(trace)
-    #     bkps = algo.predict(pen=penalty)
-    #     bkps = np.insert(bkps, 0, 0)
-    #
-    #     starts = bkps[:-1]
-    #     ends = bkps[1:]
-    #
-    #     intensities = np.array([np.mean(trace[start + 1: end - 1]) for start, end in zip(starts, ends)])
-    #
-    #
-    #     if display:
-    #         plt.plot(np.arange(len(trace)), trace)
-    #         plt.vlines(bkps, ymin=min(trace), ymax=max(trace), colors='black', linestyles='dashed')
-    #         plt.title(index)
-    #         print(intensities)
-    #         print(np.sum(intensities > min_intensity_increase))
-    #         plt.show()
-    #
-    #     binding_event_num = np.sum(intensities > min_intensity_increase)
-    #
-    #     return binding_event_num, index
-    #
-    #
-    #
-    # def trace_analysis(self, box_size=3, display=False):
-    #
-    #     if self.cluster_param is None:
-    #         raise ValueError('Please run dbscan first')
-    #     else:
-    #         pos = np.round(self.cluster_param[['x', 'y']]).astype(int).to_numpy()
-    #
-    #     # extract intensity traces
-    #     smoothed = uniform_filter(self.movie, size=(0, box_size, box_size), mode='nearest')
-    #
-    #     pos_indices = []
-    #     intensities = np.zeros((len(pos), self.movie.shape[0]))
-    #     for i, (x, y) in enumerate(pos):
-    #         intensities[i, :] = smoothed[:, y, x]
-    #         pos_indices.append(i)
-    #
-    #     # change point detection
-    #
-    #     index_eventNum = []
-    #     if display:
-    #         random_ind_list = np.arange(len(pos))
-    #         np.random.shuffle(random_ind_list)
-    #         for i in random_ind_list:
-    #             even_num, i = self.get_binding_event_num(intensities[i, :], pos_indices[i], display=display)
-    #             index_eventNum.append([i, even_num])
-    #
-    #     else:
-    #         data_with_indices = zip(intensities, pos_indices)
-    #         with multiprocessing.Pool() as pool:
-    #             for event_num, i in pool.starmap(self.get_binding_event_num, data_with_indices):
-    #                  index_eventNum.append([i, event_num])
-    #
-    #     index_eventNum = np.array(index_eventNum)
-    #     self.cluster_param.loc[index_eventNum[:, 0], 'event_num'] = index_eventNum[:, 1]
-    #
-    #
-    #     return
-
