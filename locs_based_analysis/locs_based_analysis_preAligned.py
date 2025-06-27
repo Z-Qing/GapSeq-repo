@@ -41,7 +41,7 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
 
     elif ref_path.endswith('.tif'):
         ref = one_channel_movie(ref_path, roi=ref_roi, frame_range=0)
-        ref.lq_fitting(GPU=gpu, min_net_gradient=ref_gradient, box=5)
+        ref.lq_fitting(GPU=gpu, gradient=ref_gradient, box=5)
         ref.overlap_prevent(box_radius=search_radius * 2)
 
         ref_locs = ref.locs
@@ -62,7 +62,7 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
 
         elif movie_path.endswith('.tif'):
             mov = one_channel_movie(movie_path, roi=roi, frame_range=max_frame)
-            mov.lq_fitting(gpu, min_net_gradient=mov_gradient, box=5)
+            mov.lq_fitting(gpu, gradient=mov_gradient, box=5)
 
             nuc_info[nuc] = mov.info
             nuc_locs[nuc] = mov.locs
