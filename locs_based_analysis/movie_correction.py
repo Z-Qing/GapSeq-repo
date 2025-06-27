@@ -1,14 +1,20 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import picasso.render as _render
+from picasso.io import save_locs
 from tifffile import imwrite, imread
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 from pystackreg import StackReg
 from pystackreg.util import to_uint16
 from picasso_utils import one_channel_movie
-import cupy as cp
-from scipy.ndimage import median_filter
+from scipy.ndimage import gaussian_filter, median_filter
+#from DeepFRET_utils import subtract_background_deepFRET
+
+try:
+    import cupy as cp
+except:
+    pass
 
 
 def channel_separate(movie_path):
@@ -30,14 +36,34 @@ def prepare_two_channel_movie(movie_path, gradient_1=1000, drift_correction=True
     channel_1, channel_2 = channel_separate(movie_path)
 
     if drift_correction:
-        channel_1.lq_fitting(GPU=gpu, min_net_gradient=gradient_1, box=box_1)
-        channel_2.lq_fitting(GPU=gpu, min_net_gradient=gradient_2, box=box_2)
+        channel_1.lq_fitting(GPU=gpu, gradient=gradient_1, box=box_1)
+        channel_2.lq_fitting(GPU=gpu, gradient=gradient_2, box=box_2)
 
-        channel_1.drift_correction(gpu)
-        channel_2.drift_correction(gpu)
+        if len(channel_1.locs) > 0:
+            channel_1.drift_correction(gpu)
+        if len(channel_2.locs) > 0:
+            channel_2.drift_correction(gpu)
 
 
     return channel_1, channel_2
+
+
+
+def dog_filter(image, sigma_value=20):
+    image = image.astype(np.float32)
+
+    if len(image.shape) == 3:
+        sigma = (0, sigma_value, sigma_value)
+    elif len(image.shape) == 2:
+        sigma = (sigma_value, sigma_value)
+    else:
+        raise ValueError('the image must be 2 or 3 dimensional')
+
+    blurred = gaussian_filter(image, sigma=sigma)
+    res = image - blurred
+
+    res = np.clip(res, 0, 65535)
+    return res.astype(np.uint16)
 
 
 
@@ -95,20 +121,21 @@ def stackreg_channel_alignment(mov, transform_matrix, num_processes=4):
 
 
 
-def contrast_enhance(image):
-    bg = median_filter(image, size=21)
-    image = image - bg
-    image = np.where(image < 0, 0, image)
+def contrast_enhance(image, sigma_value=20):
+    image = dog_filter(image, sigma_value=sigma_value)
+    # plt.imshow(image, cmap='gray')
+    # plt.show()
 
     min_img = np.min(image)
     max_img = np.max(image)
-    image = (image - min_img) * (255.0 / (max_img - min_img))
+    image = (image - min_img) * (65535.0 / (max_img - min_img))
 
     return image.astype(np.uint16)
 
 
-def align_red_green(movie_path, alignment_source, gpu=True):
+def align_red_green(movie_path, alignment_source, background_remove, gpu):
     channel_1, channel_2 = prepare_two_channel_movie(movie_path, gpu=gpu, drift_correction=True)
+
     if alignment_source == 'super-resolution':
         _, image_1 = _render.render(channel_1.locs, channel_1.info)
         _, image_2 = _render.render(channel_2.locs, channel_2.info)
@@ -124,8 +151,13 @@ def align_red_green(movie_path, alignment_source, gpu=True):
     sr = StackReg(StackReg.RIGID_BODY)
     red_to_green_transform_mat = sr.register(image_1, image_2)
 
+    if background_remove:
+        channel_2.movie = dog_filter(channel_2.movie)
+        channel_1.movie = dog_filter(channel_1.movie)
+
     aligned_channel_2_movie = stackreg_channel_alignment(mov=channel_2.movie,
-                                                             transform_matrix=red_to_green_transform_mat)
+                                                        transform_matrix=red_to_green_transform_mat)
+
 
     aligned_ref = np.concatenate((channel_1.movie, aligned_channel_2_movie), axis=2)
 
@@ -135,17 +167,26 @@ def align_red_green(movie_path, alignment_source, gpu=True):
 
 
 
-def two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_mat, gpu):
+def two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_mat,
+                           alignment_source, gpu, background_remove=False):
 
-    green, red = prepare_two_channel_movie(movie_path, gpu=gpu, gradient_1=5000, gradient_2=1000,
-                                           box_1=5, box_2=5, drift_correction=True)
-    green_image = green.movie[0, :, :]
+    green, red = prepare_two_channel_movie(movie_path, gpu=gpu)
+    if alignment_source == 'super-resolution':
+        _, green_image = _render.render(green.locs, green.info)
+
+    else:
+        green_image = green.movie[0, :, :]
 
     # align green to green_ref
     sr = StackReg(StackReg.RIGID_BODY)
     green_to_green_ref_mat = sr.register(green_ref_image, green_image)
-    green_aligned_movie = stackreg_channel_alignment(mov=green.movie, transform_matrix=green_to_green_ref_mat)
 
+    if background_remove:
+        green.movie = dog_filter(green.movie)
+        red.movie = dog_filter(red.movie)
+
+    #align green to green_ref
+    green_aligned_movie = stackreg_channel_alignment(mov=green.movie, transform_matrix=green_to_green_ref_mat)
     # align red to green_ref
     red_aligned_movie = stackreg_channel_alignment(red.movie,
                                         transform_matrix=np.dot(green_to_green_ref_mat, red_to_green_transform_mat))
@@ -159,13 +200,15 @@ def two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_m
 
 
 def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True,
-                                 alignment_source='super-resolution'):
+                                 gg_alignment_source='first', rg_alignment_source='first',
+                                 ref_background_remove=False, mov_background_remove=False):
     ''' This function do locs_based_analysis between different green channels using fiducial markers.
     And the fiducial markers can be detected easily in green channel but not red channel.
     The locs in green and red channels of transcription movie should be co-localized. Thus,
     the transformation matrix between green and red channel are acquired from there. '''
-
-    aligned_ref, red_to_green_transform_mat = align_red_green(ref_movie_path, alignment_source=alignment_source,
+    aligned_ref, red_to_green_transform_mat = align_red_green(ref_movie_path,
+                                                              alignment_source=rg_alignment_source,
+                                                              background_remove=ref_background_remove,
                                                               gpu=gpu)
     print(red_to_green_transform_mat)
     imwrite(ref_movie_path.replace('.tif', '_corrected.tif'), aligned_ref)
@@ -173,12 +216,19 @@ def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True,
     # use the first frame of the reference movie as the reference image
     # the fiducial markers will stand out in the green channel
     channel_1, channel_2 = channel_separate(ref_movie_path)
-    green_ref_image = channel_1.movie[0, :, :]
-    #green_ref_image = contrast_enhance(green_ref_image)
-
+    if gg_alignment_source == 'super-resolution':
+        channel_1.lq_fitting(gradient=1000, GPU=gpu)
+        _, green_ref_image = _render.render(channel_1.locs, channel_1.info)
+    elif gg_alignment_source == 'first':
+        green_ref_image = channel_1.movie[0, :, :]
+    else:
+        raise ValueError('alignment_source must be either constructed super-resolution or first')
 
     for movie_path in movie_path_list:
-        aligned_movie = two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_mat, gpu)
+        aligned_movie = two_step_channel_align(movie_path, green_ref_image,
+                                               red_to_green_transform_mat,
+                                               gg_alignment_source, gpu,
+                                               mov_background_remove)
         imwrite(movie_path.replace('.tif', '_corrected.tif'), aligned_movie)
 
 
@@ -188,7 +238,9 @@ def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True,
 
 import os
 
-def process_correction(dir_path, localization_key='localization', alignment_source='first', gpu=True):
+def process_correction(dir_path, localization_key='localization', rg_alignment_source='first',
+                       gg_alignment_source='first', gpu=True,
+                       ref_background_remove=False, mov_background_remove=False):
     files = [x for x in os.listdir(dir_path) if x.endswith('.tif') or x.endswith('.raw')]
     ref_list = [x for x in files if localization_key in x]
 
@@ -198,7 +250,7 @@ def process_correction(dir_path, localization_key='localization', alignment_sour
         mov_path = [os.path.join(dir_path, x) for x in files]
 
     elif len(ref_list) > 1:
-        # this branch is for photobleaching data
+        # when multiple reference movies detected use the first one recorded
         mov_path = [x for x in files if x not in ref_list]
         mov_path = [os.path.join(dir_path, x) for x in mov_path]
 
@@ -209,14 +261,21 @@ def process_correction(dir_path, localization_key='localization', alignment_sour
         mov_path.extend(ref_path_list)
 
     else:
-        raise ValueError('no file is found')
+        raise ValueError('no reference file is found')
 
-    position_correction_fiducial(mov_path, ref_path, gpu=gpu, alignment_source=alignment_source)
+    position_correction_fiducial(mov_path, ref_path, gpu=gpu,
+                                 gg_alignment_source=gg_alignment_source,
+                                 rg_alignment_source=rg_alignment_source,
+                                 ref_background_remove=ref_background_remove,
+                                 mov_background_remove=mov_background_remove)
 
     return
 
 
 if __name__ == "__main__":
-    process_correction("G:/CAP binding/original_files",
-                        alignment_source='first', localization_key='localization', gpu=True)
+    process_correction("G:/20250625_Steve_SpcBio_1G2ASpc",
+                       rg_alignment_source='first',
+                       gg_alignment_source='super-resolution',
+                       localization_key='Localisation', gpu=True,
+                       ref_background_remove=False, mov_background_remove=False)
 
