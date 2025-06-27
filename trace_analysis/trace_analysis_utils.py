@@ -82,18 +82,16 @@ class time_series():
 
     def plot(self, ax):
         ax.plot(np.arange(self.length), self.trace, label='Original Signal', color='#377eb8')
-        # if self.smooth is not None:
-        #     ax.plot(np.arange(self.length), self.smooth, label='Smooth Signal', color='#ff7f00')
         if self.stage_params is not None:
             if 'class' in self.stage_params.columns:
-                colors_list = ['#e41a1c' if self.stage_params['class'][i] == 1 else '#4daf4a'
-                               for i in range(len(self.stage_params))]
+                color_map = {0:'#4daf4a', 1:'#e41a1c', 2:'#000000'}
+                color_list = [color_map[self.stage_params['class'].iloc[i]] for i in range(len(self.stage_params))]
             else:
-                colors_list = ['#4daf4a'] * len(self.stage_params)
+                color_list = ['#4daf4a'] * len(self.stage_params)
 
             previous_intensity = 0
             for i, row in self.stage_params.iterrows():
-                ax.hlines(row['intensity'], xmin=row['start'], xmax=row['end'], colors=colors_list[i])
+                ax.hlines(row['intensity'], xmin=row['start'], xmax=row['end'], colors=color_list[i])
                 if i > 0:
                     ax.vlines(row['start'], ymin=previous_intensity, ymax=row['intensity'], colors='#984ea3')
                 previous_intensity = row['intensity']
@@ -112,13 +110,12 @@ class time_series():
         return
 
 
-    def binary_classify(self, intensity_threshold=3):
+    def intensity_classify(self, intensity_threshold=3):
         if self.stage_params is None:
             raise ValueError("Please run a change point detection algorithm first.")
 
         if len(self.stage_params) == 1:
             self.stage_params['class'] = 0
-            #self.stage_params['merge'] = 0
             return
 
         std_list = []
@@ -140,29 +137,16 @@ class time_series():
         label_map = {old_label: new_label for new_label, old_label in enumerate(sorted_labels)}
         new_labels = np.array([label_map[lbl] for lbl in labels])
 
-
-        #self.stage_params['merge'] = new_labels
-        self.stage_params['class'] = np.where(new_labels == 0, 0, 1)
-
-
-        # #if len(np.unique(new_labels)) >= 3:
-        # potential_base = self.stage_params[self.stage_params['merge'] == 0]
-        # if np.sum(potential_base['end'] - potential_base['start']) < self.length * 0.02:
-        #     self.stage_params['merge'] = np.where(self.stage_params['merge'] <= 0, 0,
-        #                                               self.stage_params['merge'] - 1)
-        #     self.stage_params['class'] = np.where(self.stage_params['merge'] == 0, 0, 1)
-        #
-        #
-        # #consider situation that the trace is binding all the time
-        # potential_base = self.stage_params[self.stage_params['merge'] == 0]
-        # if np.mean(potential_base['intensity']) > max_unbinging_intensity:
-        #     self.stage_params['class'] = 1
-
+        self.stage_params['class'] = np.where(new_labels >=2, 2, new_labels)
 
         return
 
 
     def merge_stage(self):
+        # in cap binding, we assume there are only three class: 2 binding (dimer) and unbinding
+        # when the intensity is too high, we exclude this stage and adjacent
+        # binding since they can't provide correct binding duration.
+        #class_num = 3
         if self.stage_params is None:
             raise ValueError("Please run a change point detection algorithm first.")
 
@@ -172,6 +156,7 @@ class time_series():
         # Ensure the DataFrame is sorted by 'start' time
         stage_params = self.stage_params.sort_values(by='start')
 
+        # merge consecutive stages with belong to the same class
         stage_params['group'] = (
                 (stage_params['class'] != stage_params['class'].shift())
         ).cumsum()
@@ -189,7 +174,7 @@ class time_series():
         stage_params['intensity'] = stage_params.apply(
             lambda row: np.mean(self.trace[int(row['start'] + 1):int(row['end'] - 1)]), axis=1)
 
-        stage_params.sort_values(by='start', inplace=True)
+        #stage_params.sort_values(by='start', inplace=True)
         stage_params.reset_index(drop=True, inplace=True)
 
         self.stage_params = stage_params
