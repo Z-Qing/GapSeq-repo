@@ -109,7 +109,7 @@ def process_analysis_Localization(dir_path, pattern, ref_path=None, target_forma
     else:
         ref = ref_path
         ref_keyword = os.path.basename(ref_path).split('.')[0]
-        mov_list = [os.path.join(dir_path, x) for x in files if (ref_keyword not in x) and (localization_keyword in x)]
+        mov_list = [os.path.join(dir_path, x) for x in files if localization_keyword.lower() not in x.lower()]
 
     counts = locs_based_analysis_preAligned(ref, mov_list, pattern=pattern, search_radius=search_radius, gpu=gpu,
                                             roi=[0, 428, 684, 856], ref_roi=[0, 0, 684, 428], max_frame=max_frame,
@@ -155,7 +155,7 @@ if __name__ == "__main__":
                                   ref_path="G:/20250625_Steve_SpcBio_1G2ASpc_LC_counting/Steve_SpcBio_1G2ASpc_Localisation_corrected_picasso_bboxes_overlappingBoxesRemoved.hdf5",
                                   localization_keyword='localization', # only used when ref_path is not provided
                                   gpu=True,
-                                  pattern=r'_seal1([A-Za-z])_', # r'degen100nM_([A-Za-z])_',
+                                  pattern=r'_seal(.*?)_', # r'degen100nM_([A-Za-z])_',
                                   max_frame=np.inf,
                                   save_hdf5=False,
                                   target_format='.tif',
