@@ -8,7 +8,7 @@ from scipy.spatial import KDTree
 from picasso_utils import one_channel_movie
 from sklearn.cluster import DBSCAN
 from picasso.postprocess import link
-
+import warnings
 
 def neighbour_counting(ref_points, mov_points, nuc, box_radius=1.5):
     # Extract x, y coordinates
@@ -53,7 +53,12 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
     nuc_locs = {}
     nuc_info = {}
     for movie_path in mov_list:
-        nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
+        try:
+            nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
+        except:
+            warnings.warn('cannot find nucleotide for {}'.format(movie_path))
+            continue
+
         if movie_path.endswith('.hdf5'):
             locs, info = load_locs(movie_path)
             locs = locs[locs.frame < max_frame]
@@ -62,6 +67,7 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
 
         elif movie_path.endswith('.tif'):
             mov = one_channel_movie(movie_path, roi=roi, frame_range=max_frame)
+            mov.movie_format(baseline=10)
             mov.lq_fitting(gpu, gradient=mov_gradient, box=5)
 
             nuc_info[nuc] = mov.info
@@ -103,7 +109,7 @@ def process_analysis_Localization(dir_path, pattern, ref_path=None, target_forma
     else:
         ref = ref_path
         ref_keyword = os.path.basename(ref_path).split('.')[0]
-        mov_list = [os.path.join(dir_path, x) for x in files if ref_keyword.replace('_picasso_bboxes', '') not in x]
+        mov_list = [os.path.join(dir_path, x) for x in files if (ref_keyword not in x) and (localization_keyword in x)]
 
     counts = locs_based_analysis_preAligned(ref, mov_list, pattern=pattern, search_radius=search_radius, gpu=gpu,
                                             roi=[0, 428, 684, 856], ref_roi=[0, 0, 684, 428], max_frame=max_frame,
@@ -145,11 +151,11 @@ def process_analysis_ALEX(dir_path, search_radius=2, gradient=1000, gpu=True):
 
 if __name__ == "__main__":
     #process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
-    process_analysis_Localization("G:/Cap_library_24062025/20250624_CAP_1base_seqN",
-                                  ref_path="Z:/Qing_2/GAPSeq/CAP binding/20250624_CAP_1base_seqN/Median/CAP_1base_seqN_libary_localization_corrected_picasso_bboxes.hdf5",
+    process_analysis_Localization("G:/20250625_Steve_SpcBio_1G2ASpc_LC_counting",
+                                  ref_path="G:/20250625_Steve_SpcBio_1G2ASpc_LC_counting/Steve_SpcBio_1G2ASpc_Localisation_corrected_picasso_bboxes_overlappingBoxesRemoved.hdf5",
                                   localization_keyword='localization', # only used when ref_path is not provided
                                   gpu=True,
-                                  pattern=r'_S5([A-Za-z])', # r'degen100nM_([A-Za-z])_',
+                                  pattern=r'_seal1([A-Za-z])_', # r'degen100nM_([A-Za-z])_',
                                   max_frame=np.inf,
                                   save_hdf5=False,
                                   target_format='.tif',
