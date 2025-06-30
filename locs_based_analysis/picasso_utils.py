@@ -104,9 +104,9 @@ class one_channel_movie(object):
             self.movie_format()
 
         curr, futures = identify_async(self.movie, gradient, box, roi=None)
-        # N = len(self.movie)
-        # while curr[0] < N:
-        #     time.sleep(0.2)
+        N = len(self.movie)
+        while curr[0] < N:
+            time.sleep(0.2)
         ids = identifications_from_futures(futures)
         spots = get_spots(self.movie, ids, box, self.camera_info)
         em = self.camera_info["Gain"] > 1
@@ -116,9 +116,9 @@ class one_channel_movie(object):
             locs = locs_from_fits_gpufit(ids, theta, box, em)
         else:
             fs = fit_spots_parallel(spots, asynch=True)
-            # n_tasks = len(fs)
-            # while n_futures_done(fs) < n_tasks:
-            #     time.sleep(0.2)
+            n_tasks = len(fs)
+            while n_futures_done(fs) < n_tasks:
+                time.sleep(0.2)
             theta = fits_from_futures(fs)
             locs = locs_from_fits(ids, theta, box, em)
 
