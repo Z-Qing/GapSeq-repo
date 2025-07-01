@@ -8,8 +8,7 @@ import multiprocessing
 from pystackreg import StackReg
 from pystackreg.util import to_uint16
 from picasso_utils import one_channel_movie
-from scipy.ndimage import gaussian_filter, median_filter
-#from DeepFRET_utils import subtract_background_deepFRET
+from DeepFRET_utils import subtract_background_deepFRET
 
 try:
     import cupy as cp
@@ -46,25 +45,6 @@ def prepare_two_channel_movie(movie_path, gradient_1=1000, drift_correction=True
 
 
     return channel_1, channel_2
-
-
-
-def dog_filter(image, sigma_value=20):
-    image = image.astype(np.float32)
-
-    if len(image.shape) == 3:
-        sigma = (0, sigma_value, sigma_value)
-    elif len(image.shape) == 2:
-        sigma = (sigma_value, sigma_value)
-    else:
-        raise ValueError('the image must be 2 or 3 dimensional')
-
-    blurred = gaussian_filter(image, sigma=sigma)
-    res = image - blurred
-
-    res = np.clip(res, 0, 65535)
-    return res.astype(np.uint16)
-
 
 
 def process_frame(frame, transform_mat, sr):
@@ -152,8 +132,8 @@ def align_red_green(movie_path, alignment_source, background_remove, gpu):
     red_to_green_transform_mat = sr.register(image_1, image_2)
 
     if background_remove:
-        channel_2.movie = dog_filter(channel_2.movie)
-        channel_1.movie = dog_filter(channel_1.movie)
+        channel_2.movie = subtract_background_deepFRET(channel_2.movie)
+        channel_1.movie = subtract_background_deepFRET(channel_1.movie)
 
     aligned_channel_2_movie = stackreg_channel_alignment(mov=channel_2.movie,
                                                         transform_matrix=red_to_green_transform_mat)
@@ -182,8 +162,8 @@ def two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_m
     green_to_green_ref_mat = sr.register(green_ref_image, green_image)
 
     if background_remove:
-        green.movie = dog_filter(green.movie)
-        red.movie = dog_filter(red.movie)
+        green.movie = subtract_background_deepFRET(green.movie)
+        red.movie = subtract_background_deepFRET(red.movie)
 
     #align green to green_ref
     green_aligned_movie = stackreg_channel_alignment(mov=green.movie, transform_matrix=green_to_green_ref_mat)
@@ -273,9 +253,9 @@ def process_correction(dir_path, localization_key='localization', rg_alignment_s
 
 
 if __name__ == "__main__":
-    process_correction("G:/20250625_Steve_SpcBio_1G2ASpc",
+    process_correction("G:/20250629_IPE_trans_ALEXExp38",
                        rg_alignment_source='first',
-                       gg_alignment_source='super-resolution',
-                       localization_key='Localisation', gpu=True,
-                       ref_background_remove=False, mov_background_remove=False)
+                       gg_alignment_source='first',
+                       localization_key='ALEx', gpu=True,
+                       ref_background_remove=False, mov_background_remove=True)
 
