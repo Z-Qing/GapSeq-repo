@@ -119,7 +119,7 @@ def stackreg_channel_alignment(mov, transform_matrix, num_processes=4):
 
 
 def contrast_enhance(image, sigma_value=20):
-    image = dog_filter(image, sigma_value=sigma_value)
+    # image = dog_filter(image, sigma_value=sigma_value)
     # plt.imshow(image, cmap='gray')
     # plt.show()
 
@@ -270,9 +270,9 @@ def process_correction(dir_path, localization_key='localization', rg_alignment_s
 
 
 if __name__ == "__main__":
-    process_correction("G:/20250629_IPE_trans_ALEXExp38",
+    process_correction("G:/CAP binding/20250707_CAP_library_2.5nM",
                        rg_alignment_source='first',
                        gg_alignment_source='first',
-                       localization_key='ALEx', gpu=True,
-                       ref_background_remove=False, mov_background_remove=True)
+                       localization_key='localization', gpu=True,
+                       ref_background_remove=False, mov_background_remove=False)
 
