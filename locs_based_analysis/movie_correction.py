@@ -118,14 +118,13 @@ def stackreg_channel_alignment(mov, transform_matrix, num_processes=4):
 
 
 
-def contrast_enhance(image, sigma_value=20):
-    # image = dog_filter(image, sigma_value=sigma_value)
-    # plt.imshow(image, cmap='gray')
-    # plt.show()
+def contrast_enhance(image):
+    # keep the fiducial markers
+    threshold = np.percentile(image, 90)
+    image = np.where(image > threshold, image, 0)
 
-    min_img = np.min(image)
     max_img = np.max(image)
-    image = (image - min_img) * (65535.0 / (max_img - min_img))
+    image = image / max_img * 65535.0
 
     return image.astype(np.uint16)
 
@@ -270,7 +269,7 @@ def process_correction(dir_path, localization_key='localization', rg_alignment_s
 
 
 if __name__ == "__main__":
-    process_correction("G:/CAP binding/20250707_CAP_library_2.5nM",
+    process_correction("Z:/Svea/Experiments/20250710_Steve_5SpcBio_1A2TSpc/Movies Position 2",
                        rg_alignment_source='first',
                        gg_alignment_source='first',
                        localization_key='localization', gpu=True,
