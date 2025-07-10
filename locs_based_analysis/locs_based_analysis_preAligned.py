@@ -10,7 +10,7 @@ from sklearn.cluster import DBSCAN
 from picasso.postprocess import link
 import warnings
 
-def neighbour_counting(ref_points, mov_points, nuc, box_radius=1.5):
+def neighbour_counting(ref_points, mov_points, nuc, search_radius=2):
     # Extract x, y coordinates
     ref_coords = np.column_stack((ref_points['x'], ref_points['y']))
     mov_coords = np.column_stack((mov_points['x'], mov_points['y']))
@@ -34,7 +34,7 @@ def neighbour_counting(ref_points, mov_points, nuc, box_radius=1.5):
 
 
 def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
-                                   mov_gradient=1000, max_frame=np.inf,
+                                   mov_gradient=1000, max_frame=np.inf, mov_baseline=400,
                                    gpu=True, ref_roi=None, ref_gradient=400, roi=None, save_hdf5=False):
     if ref_path.endswith('.hdf5'):
         ref_locs, _ = load_locs(ref_path)
@@ -51,7 +51,7 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
         raise ValueError('please provide the address of .hdf5 or .tif file')
 
     nuc_locs = {}
-    nuc_info = {}
+    #nuc_info = {}
     for movie_path in mov_list:
         try:
             nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
@@ -63,14 +63,14 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
             locs, info = load_locs(movie_path)
             locs = locs[locs.frame < max_frame]
             nuc_locs[nuc] = locs
-            nuc_info[nuc] = info
+            #nuc_info[nuc] = info
 
         elif movie_path.endswith('.tif'):
             mov = one_channel_movie(movie_path, roi=roi, frame_range=max_frame)
-            mov.movie_format(baseline=10)
+            mov.movie_format(baseline=mov_baseline)
             mov.lq_fitting(gpu, gradient=mov_gradient, box=5)
 
-            nuc_info[nuc] = mov.info
+            #nuc_info[nuc] = mov.info
             nuc_locs[nuc] = mov.locs
 
             if save_hdf5:
@@ -82,7 +82,7 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
     # ----------------------- neighbour counting ----------------------
     total_params = []
     for nuc in nuc_locs.keys():
-        param = neighbour_counting(ref_locs, nuc_locs[nuc], nuc, box_radius=search_radius)
+        param = neighbour_counting(ref_locs, nuc_locs[nuc], nuc, search_radius=search_radius)
         total_params.append(param)
 
     counting_params = pd.concat(total_params, axis=1)
@@ -153,7 +153,7 @@ if __name__ == "__main__":
     #process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
     process_analysis_Localization("G:/20250625_Steve_SpcBio_1G2ASpc_LC_counting",
                                   ref_path="G:/20250625_Steve_SpcBio_1G2ASpc_LC_counting/Steve_SpcBio_1G2ASpc_Localisation_corrected_picasso_bboxes_overlappingBoxesRemoved.hdf5",
-                                  localization_keyword='localization', # only used when ref_path is not provided
+                                  localization_keyword='localization', # use for find reference molecules or exclude the localization movie
                                   gpu=True,
                                   pattern=r'_seal(.*?)_', # r'degen100nM_([A-Za-z])_',
                                   max_frame=np.inf,
