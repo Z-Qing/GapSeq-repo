@@ -21,7 +21,7 @@ def export_locs_picasso(ref_hdf5_path, index, movie_list, gpu=True, box_size=2):
     for movie_path in movie_list:
         if movie_path.endswith('.tif'):
             mov = one_channel_movie(movie_path, roi=roi)
-            mov.lq_fitting(gpu, min_net_gradient=1000, box=5)
+            mov.lq_fitting(gpu, gradient=1000, box=5)
             mov_coords = np.column_stack((mov.locs['x'], mov.locs['y']))
 
         elif movie_path.endswith('.hdf5'):
