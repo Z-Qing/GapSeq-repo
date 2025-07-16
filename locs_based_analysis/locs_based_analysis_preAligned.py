@@ -9,6 +9,8 @@ from picasso_utils import one_channel_movie
 from sklearn.cluster import DBSCAN
 from picasso.postprocess import link
 import warnings
+import matplotlib.pyplot as plt
+
 
 def neighbour_counting(ref_points, mov_points, nuc, search_radius=2):
     # Extract x, y coordinates
@@ -35,12 +37,13 @@ def neighbour_counting(ref_points, mov_points, nuc, search_radius=2):
 
 def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
                                    mov_gradient=1000, max_frame=np.inf, mov_baseline=400,
-                                   gpu=True, ref_roi=None, ref_gradient=400, roi=None, save_hdf5=False):
+                                   gpu=True, ref_roi=(0, 0, 684, 428), ref_gradient=400, roi=None, save_hdf5=False):
     if ref_path.endswith('.hdf5'):
         ref_locs, _ = load_locs(ref_path)
 
     elif ref_path.endswith('.tif'):
         ref = one_channel_movie(ref_path, roi=ref_roi, frame_range=0)
+        ref.movie_format()
         ref.lq_fitting(GPU=gpu, gradient=ref_gradient, box=5)
         ref.overlap_prevent(box_radius=search_radius * 2)
 
@@ -63,14 +66,12 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
             locs, info = load_locs(movie_path)
             locs = locs[locs.frame < max_frame]
             nuc_locs[nuc] = locs
-            #nuc_info[nuc] = info
 
         elif movie_path.endswith('.tif'):
             mov = one_channel_movie(movie_path, roi=roi, frame_range=max_frame)
             mov.movie_format(baseline=mov_baseline)
             mov.lq_fitting(gpu, gradient=mov_gradient, box=5)
 
-            #nuc_info[nuc] = mov.info
             nuc_locs[nuc] = mov.locs
 
             if save_hdf5:
@@ -151,12 +152,12 @@ def process_analysis_ALEX(dir_path, search_radius=2, gradient=1000, gpu=True):
 
 if __name__ == "__main__":
     #process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
-    process_analysis_Localization("G:/time_vs_accoracy/3base_GapT",
-                                  ref_path="G:/time_vs_accoracy/3base_GapT/GAP13_3ntseq_pos5seq8%dex20%form_GAP13_localization-1_corrected.hdf5",
-                                  localization_keyword='localization', # use for find reference molecules or exclude the localization movie
+    process_analysis_Localization("G:/time_vs_accoracy/comp_GapT",
+                                  ref_path=None,
+                                  localization_keyword='Localization', # use for find reference molecules or exclude the localization movie
                                   gpu=True,
                                   pattern=r'_S3(.*?)300nM_', # r'degen100nM_([A-Za-z])_',
-                                  max_frame=200,
+                                  max_frame=1000,
                                   save_hdf5=False,
                                   target_format='.tif',
                                   search_radius=2, gradient=1000)

@@ -75,7 +75,7 @@ class one_channel_movie(object):
                     info[0]['Frames'] = self.frame_range[1] - self.frame_range[0]
 
                 elif isinstance(self.frame_range, int):
-                    movie = movie[:self.frame_range, :, :]
+                    movie = movie[self.frame_range, :, :]
                     info[0]['Frames'] = 1
 
                 else:
