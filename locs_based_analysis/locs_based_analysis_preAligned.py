@@ -19,7 +19,7 @@ def neighbour_counting(ref_points, mov_points, nuc, search_radius=2):
     tree = KDTree(mov_coords)
 
     # Query neighbors within the given radius
-    indices = tree.query_ball_point(ref_coords, box_radius)
+    indices = tree.query_ball_point(ref_coords, search_radius)
 
     # Count neighbors for each reference point
     neighbor_counts = [len(neigh) for neigh in indices]
@@ -151,12 +151,12 @@ def process_analysis_ALEX(dir_path, search_radius=2, gradient=1000, gpu=True):
 
 if __name__ == "__main__":
     #process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
-    process_analysis_Localization("G:/20250625_Steve_SpcBio_1G2ASpc_LC_counting",
-                                  ref_path="G:/20250625_Steve_SpcBio_1G2ASpc_LC_counting/Steve_SpcBio_1G2ASpc_Localisation_corrected_picasso_bboxes_overlappingBoxesRemoved.hdf5",
+    process_analysis_Localization("G:/time_vs_accoracy/3base_GapT",
+                                  ref_path="G:/time_vs_accoracy/3base_GapT/GAP13_3ntseq_pos5seq8%dex20%form_GAP13_localization-1_corrected.hdf5",
                                   localization_keyword='localization', # use for find reference molecules or exclude the localization movie
                                   gpu=True,
-                                  pattern=r'_seal(.*?)_', # r'degen100nM_([A-Za-z])_',
-                                  max_frame=np.inf,
+                                  pattern=r'_S3(.*?)300nM_', # r'degen100nM_([A-Za-z])_',
+                                  max_frame=200,
                                   save_hdf5=False,
                                   target_format='.tif',
                                   search_radius=2, gradient=1000)
