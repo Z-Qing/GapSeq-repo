@@ -76,6 +76,7 @@ class one_channel_movie(object):
 
                 elif isinstance(self.frame_range, int):
                     movie = movie[self.frame_range, :, :]
+                    movie = movie[np.newaxis, :, :]
                     info[0]['Frames'] = 1
 
                 else:

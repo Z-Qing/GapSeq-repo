@@ -37,7 +37,7 @@ def neighbour_counting(ref_points, mov_points, nuc, search_radius=2):
 
 def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
                                    mov_gradient=1000, max_frame=np.inf, mov_baseline=400,
-                                   gpu=True, ref_roi=(0, 0, 684, 428), ref_gradient=400, roi=None, save_hdf5=False):
+                                   gpu=True, ref_roi=None, ref_gradient=400, roi=None, save_hdf5=False):
     if ref_path.endswith('.hdf5'):
         ref_locs, _ = load_locs(ref_path)
 
@@ -54,7 +54,6 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
         raise ValueError('please provide the address of .hdf5 or .tif file')
 
     nuc_locs = {}
-    #nuc_info = {}
     for movie_path in mov_list:
         try:
             nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
@@ -153,11 +152,11 @@ def process_analysis_ALEX(dir_path, search_radius=2, gradient=1000, gpu=True):
 if __name__ == "__main__":
     #process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
     process_analysis_Localization("G:/time_vs_accoracy/comp_GapT",
-                                  ref_path=None,
+                                  ref_path="G:/time_vs_accoracy/comp_GapT/GAP_T_8nt_comp_df10_GAP_T_Localization_corrected.hdf5",
                                   localization_keyword='Localization', # use for find reference molecules or exclude the localization movie
                                   gpu=True,
                                   pattern=r'_S3(.*?)300nM_', # r'degen100nM_([A-Za-z])_',
-                                  max_frame=1000,
+                                  max_frame=800,
                                   save_hdf5=False,
                                   target_format='.tif',
                                   search_radius=2, gradient=1000)
