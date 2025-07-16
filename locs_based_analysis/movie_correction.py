@@ -9,28 +9,11 @@ from pystackreg import StackReg
 from pystackreg.util import to_uint16
 from picasso_utils import one_channel_movie
 from DeepFRET_utils import subtract_background_deepFRET
-from scipy.ndimage import gaussian_filter
 
 try:
     import cupy as cp
 except:
     pass
-
-def dog_filter(image, sigma_value=20):
-    image = image.astype(np.float32)
-
-    if len(image.shape) == 3:
-        sigma = (0, sigma_value, sigma_value)
-    elif len(image.shape) == 2:
-        sigma = (sigma_value, sigma_value)
-    else:
-        raise ValueError('the image must be 2 or 3 dimensional')
-
-    blurred = gaussian_filter(image, sigma=sigma)
-    res = image - blurred
-
-    res = np.clip(res, 0, 65535)
-    return res.astype(np.uint16)
 
 
 def channel_separate(movie_path):
@@ -275,3 +258,9 @@ if __name__ == "__main__":
                        localization_key='localization', gpu=True,
                        ref_background_remove=False, mov_background_remove=False)
 
+    # channel_1, channel_2 = prepare_two_channel_movie("G:/Miri_GapSeq/20240802_GapSeq_8mer_Tween/100nM/undrift/"
+    #                                                  "GapSeq_8mer_Tween_GapA_100nM8merA643BhQ1_200ms_8gl_6r.tif",
+    #                                                  gradient_1=500, gradient_2=500)
+    # undrifted = np.concatenate((channel_1.movie, channel_2.movie), axis=2)
+    # imwrite("G:/Miri_GapSeq/20240802_GapSeq_8mer_Tween/100nM/undrift/"
+    #             "GapSeq_8mer_Tween_GapA_100nM8merA643BhQ1_200ms_8gl_6r_undrifted.tif", undrifted)
