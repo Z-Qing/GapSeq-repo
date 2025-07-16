@@ -67,10 +67,9 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
             nuc_locs[nuc] = locs
 
         elif movie_path.endswith('.tif'):
-            mov = one_channel_movie(movie_path, roi=roi, frame_range=max_frame)
+            mov = one_channel_movie(movie_path, roi=roi, frame_range=(0, max_frame))
             mov.movie_format(baseline=mov_baseline)
             mov.lq_fitting(gpu, gradient=mov_gradient, box=5)
-
             nuc_locs[nuc] = mov.locs
 
             if save_hdf5:
@@ -151,12 +150,12 @@ def process_analysis_ALEX(dir_path, search_radius=2, gradient=1000, gpu=True):
 
 if __name__ == "__main__":
     #process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
-    process_analysis_Localization("G:/time_vs_accoracy/comp_GapT",
-                                  ref_path="G:/time_vs_accoracy/comp_GapT/GAP_T_8nt_comp_df10_GAP_T_Localization_corrected.hdf5",
-                                  localization_keyword='Localization', # use for find reference molecules or exclude the localization movie
+    process_analysis_Localization("G:/time_vs_accoracy/3base_GapT",
+                                  ref_path=None,
+                                  localization_keyword='localization', # use for find reference molecules or exclude the localization movie
                                   gpu=True,
-                                  pattern=r'_S3(.*?)300nM_', # r'degen100nM_([A-Za-z])_',
-                                  max_frame=800,
+                                  pattern=r'_S5(.*?)_', # r'degen100nM_([A-Za-z])_',
+                                  max_frame=1000,
                                   save_hdf5=False,
                                   target_format='.tif',
                                   search_radius=2, gradient=1000)
