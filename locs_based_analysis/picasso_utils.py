@@ -71,13 +71,17 @@ class one_channel_movie(object):
             # change the frame range if it is not None
             if self.frame_range is not np.inf:
                 if isinstance(self.frame_range, (list, tuple)):
-                    movie = movie[self.frame_range[0]: self.frame_range[1], :, :]
-                    info[0]['Frames'] = self.frame_range[1] - self.frame_range[0]
+                    if self.frame_range[1] is np.inf:
+                        movie = movie[self.frame_range[0]:, :, :]
+                    else:
+                        movie = movie[self.frame_range[0]: self.frame_range[1], :, :]
+                        info[0]['Frames'] = self.frame_range[1] - self.frame_range[0]
 
                 elif isinstance(self.frame_range, int):
                     movie = movie[self.frame_range, :, :]
                     movie = movie[np.newaxis, :, :]
                     info[0]['Frames'] = 1
+
 
                 else:
                     raise ValueError("frame_range must be a list/tuple for a range or"
