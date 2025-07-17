@@ -150,12 +150,13 @@ def process_analysis_ALEX(dir_path, search_radius=2, gradient=1000, gpu=True):
 
 if __name__ == "__main__":
     #process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
-    process_analysis_Localization("G:/time_vs_accoracy/3base_GapT",
-                                  ref_path=None,
+
+    process_analysis_Localization("G:/time_vs_accuracy/5base/pos6",
+                                  ref_path="G:/time_vs_accuracy/5base/pos6/GAP13_5ntseq_pos6seq_GAP13_localization_corrected.hdf5",
                                   localization_keyword='localization', # use for find reference molecules or exclude the localization movie
                                   gpu=True,
-                                  pattern=r'_S5(.*?)_', # r'degen100nM_([A-Za-z])_',
-                                  max_frame=1000,
-                                  save_hdf5=False,
-                                  target_format='.tif',
+                                  pattern=r'_S6(.*?)1uM', # r'degen100nM_([A-Za-z])_',
+                                  max_frame=200,
+                                  save_hdf5=True,
+                                  target_format='.hdf5',
                                   search_radius=2, gradient=1000)

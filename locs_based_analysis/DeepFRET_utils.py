@@ -45,8 +45,8 @@ def _compute_background(frame, deg, s, by):
     return bg
 
 
-# if __name__ == '__main__':
-#     from tifffile import imread, imwrite
-#     image = imread("G:/background_remove/GAP_G_Ncomp_seal100nM_seal3A_100nM.tif")
-#     filtered = subtract_background_deepFRET(image)
-#     imwrite("G:/background_remove/GAP_G_Ncomp_seal100nM_seal3A_100nM_filtered.tif", filtered)
+if __name__ == '__main__':
+    from tifffile import imread, imwrite
+    image = imread("G:/background_remove/GAP_G_Ncomp_seal100nM_seal3A_100nM-1_red.tif")
+    filtered = subtract_background_deepFRET(image, s=1e6, deg=1)
+    imwrite("G:/background_remove/GAP_G_Ncomp_seal100nM_seal3A_100nM-1_red_filtered_deg1.tif", filtered)

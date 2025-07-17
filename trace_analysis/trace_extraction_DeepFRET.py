@@ -23,7 +23,7 @@ def create_circular_masks(image_shape, yx, inner_radius, gap_width, outer_radius
 
 
 def calculate_intensities(movie_path, hdf5_path, inner_radius=3, gap_width=1,
-                          outer_radius=6, raw=False):
+                          roi=(0, 428, 684, 856), outer_radius=6, raw=False):
     """
     adapted from DeepFRET
     raw:
@@ -34,6 +34,8 @@ def calculate_intensities(movie_path, hdf5_path, inner_radius=3, gap_width=1,
     yx_coords = locs[['y', 'x']].to_numpy()
 
     image_stack = imread(movie_path)
+    image_stack = image_stack[:, roi[0]:roi[2], roi[1]:roi[3]]
+
     n_frames = image_stack.shape[0]
     n_localizations = len(yx_coords)
 
@@ -79,5 +81,5 @@ def calculate_intensities(movie_path, hdf5_path, inner_radius=3, gap_width=1,
 
 
 if __name__ == '__main__':
-    calculate_intensities(movie_path="G:/CAP binding/Cap_library_24062025/20250624_CAP_1base_seqN/temp/CAP_1base_seqN_CAP_binding_corrected.tif",
-                          hdf5_path="G:/CAP binding/Cap_library_24062025/20250624_CAP_1base_seqN/temp/CAP_1base_seqN_libary_localization_corrected_green_first_frame_locs.hdf5")
+    calculate_intensities(movie_path="G:/CAP binding/20250707_CAP_library_2.5nM/CAP_library_2.5nM_CAP_binding_2.5nM_halfdiluted-2_corrected.tif",
+                          hdf5_path="G:/CAP binding/20250707_CAP_library_2.5nM/CAP_library_2.5nM_library_localization_corrected_first_frame_locs.hdf5")
