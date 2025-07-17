@@ -57,19 +57,26 @@ def threshold_selection(data, degree=12, bin_size=10, display=True):
         transition_x = global_min_x  # Fallback
 
     if display:
-        plt.figure(figsize=(10, 6))
-        plt.plot(positions, first_deriv, 'b-', alpha=0.5, label='First Derivative (data)')
-        plt.plot(x_fine, y_fine, 'r-', label='Polynomial Fit')
-        plt.axhline(0, color='gray', linestyle='--')
-        #plt.axvline(global_min_x, color='green', linestyle=':', label='Global Min')
-        # if candidate1:
-        #     plt.axvline(candidate1, color='purple', linestyle=':', label='Zero Crossing')
-        # if candidate2:
-        #     plt.axvline(candidate2, color='orange', linestyle=':', label='First Max')
-        plt.axvline(transition_x, color='black', linewidth=2, label='Selected Transition')
+        fig, ax = plt.subplots(2, 1)
+        ax[1].plot(positions, first_deriv, 'b-', alpha=0.5, label='First Derivative (data)')
+        ax[1].plot(x_fine, y_fine, 'r-', label='Polynomial Fit')
+        ax[1].axhline(0, color='gray', linestyle='--')
+        ax[1].axvline(global_min_x, color='green', linestyle=':', label='Global Min')
+        if candidate1:
+            ax[1].axvline(candidate1, color='purple', linestyle=':', label='Zero Crossing')
+        if candidate2:
+            ax[1].axvline(candidate2, color='orange', linestyle=':', label='First Max')
+        ax[1].axvline(transition_x, color='black', linewidth=2, label='Selected Transition')
+        ax[0].bar(positions, counts, width=bin_size)
+        ax[0].axvline(transition_x, color='black', linewidth=2)
         plt.legend()
         plt.show()
 
+    # df = pd.DataFrame.from_dict({'LC': positions, 'counts': counts, 'first derivative': first_deriv})
+    # df.to_csv("G:/time_vs_accuracy/comp/comp_GapG/csv_files/8nt_comp_GAP_G_GAP_G_localization_corrected_neighbour_counting_radius2_1200_hist.csv", index=False)
+    # df = pd.DataFrame.from_dict({'x position': x_fine, 'fitted poly': y_fine})
+    # df.to_csv("G:/time_vs_accuracy/comp/comp_GapG/csv_files/8nt_comp_GAP_G_GAP_G_localization_corrected_neighbour_counting_radius2_1200_fittedPoly.csv", index=False)
+    #
     return transition_x
 
 
@@ -151,7 +158,6 @@ def base_calling(path, maximum_length, correct_pick=None, bin_width=5,
         ax[0].plot(thresholds, accuracy_rate, '-o', label='accuracy rate')
         ax[1].plot(thresholds, molecule_number, '-o', label='molecular number')
         plt.legend(loc='best')
-        #plt.savefig('E:/Thesis/chapter4_GapSeq/figures/threshold determination/threshold_confidence.png', dpi=600)
         plt.show()
 
 
@@ -165,13 +171,13 @@ def base_calling(path, maximum_length, correct_pick=None, bin_width=5,
 #              900, exp_type='competitive',  correct_pick='A', display=True)
 # #
 # base_calling("G:/time_vs_accuracy/comp/comp_GapG/csv_files/8nt_comp_GAP_G_GAP_G_localization_corrected_neighbour_counting_radius2_1200.csv",
-#              1100, exp_type='competitive',  correct_pick='C', display=True)
+#              (1200 * 0.95), exp_type='competitive',  correct_pick='C', display=True)
 #
-# base_calling("G:/time_vs_accuracy/5base/pos6/GAP13_5ntseq_pos6seq_GAP13_localization_corrected_neighbour_counting_radius2_1200.csv",
-#              1100, exp_type='competitive',  correct_pick='C', display=True)
+# base_calling("G:/time_vs_accuracy/5base/pos6/csv_files/GAP13_5ntseq_pos6seq_GAP13_localization_corrected_neighbour_counting_radius2_1200.csv",
+#              (1200*0.95), exp_type='competitive',  correct_pick='C', display=True)
 #
-# base_calling("G:/time_vs_accuracy/nonComp_GapT/csv_files/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes_neighbour_counting_radius2_200.csv",
-#              180, exp_type='non-competitive', correct_pick='A', display=True)
+# base_calling("G:/time_vs_accuracy/nonComp_GapT/csv_files/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes_neighbour_counting_radius2_1000.csv",
+#              (1000*0.95), exp_type='non-competitive', correct_pick='A', display=True)
 
 
 def time_VS_accuracy(dir_path, correct_pick, confidence, exp_type):
@@ -217,6 +223,6 @@ def time_VS_accuracy(dir_path, correct_pick, confidence, exp_type):
     df.to_csv(dir_path + '/frame_vs_accuracy_confidence{}.csv'.format(confidence), index=False)
     return
 
-#
-time_VS_accuracy("G:/time_vs_accuracy/5base/pos6/csv_files",
-                 correct_pick='C', confidence=0.2, exp_type='competitive')
+
+# time_VS_accuracy("G:/time_vs_accuracy/5base/pos6/csv_files",
+#                  correct_pick='C', confidence=0.2, exp_type='competitive')
