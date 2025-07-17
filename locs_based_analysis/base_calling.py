@@ -72,11 +72,7 @@ def threshold_selection(data, degree=12, bin_size=10, display=True):
         plt.legend()
         plt.show()
 
-    # df = pd.DataFrame.from_dict({'LC': positions, 'counts': counts, 'first derivative': first_deriv})
-    # df.to_csv("G:/time_vs_accuracy/comp/comp_GapG/csv_files/8nt_comp_GAP_G_GAP_G_localization_corrected_neighbour_counting_radius2_1200_hist.csv", index=False)
-    # df = pd.DataFrame.from_dict({'x position': x_fine, 'fitted poly': y_fine})
-    # df.to_csv("G:/time_vs_accuracy/comp/comp_GapG/csv_files/8nt_comp_GAP_G_GAP_G_localization_corrected_neighbour_counting_radius2_1200_fittedPoly.csv", index=False)
-    #
+
     return transition_x
 
 
@@ -91,10 +87,6 @@ def competitive_selection(param, threshold):
     sorted.sort(axis=1)
     diff = sorted[:, 1] - sorted[:, 0]
     diff = diff / diff.max()
-
-    # diff = diff / np.median(diff)
-    # scaler = MinMaxScaler()
-    # diff = scaler.fit_transform(diff.reshape(-1, 1)).flatten()
 
     return choice, diff
 
@@ -123,7 +115,7 @@ def base_calling(path, maximum_length, correct_pick=None, bin_width=5,
     # ----------------- threshold selection ------------------------------
     locs_counts = param.to_numpy().flatten()
     transition_point = threshold_selection(locs_counts, bin_size=bin_width)
-    #transition_point = 50
+
 
     # ----------------- confidence VS accuracy rate plot -------------------
     if exp_type == 'competitive':
@@ -160,24 +152,8 @@ def base_calling(path, maximum_length, correct_pick=None, bin_width=5,
         plt.legend(loc='best')
         plt.show()
 
-
-
-
     return pd.DataFrame({'choice': choice, 'diff': diff})
 
-
-
-# base_calling("G:/time_vs_accuracy/comp/comp_GapT/csv_files/GAP_T_8nt_comp_df10_GAP_T_Localization_corrected_neighbour_counting_radius2_1000.csv",
-#              900, exp_type='competitive',  correct_pick='A', display=True)
-# #
-# base_calling("G:/time_vs_accuracy/comp/comp_GapG/csv_files/8nt_comp_GAP_G_GAP_G_localization_corrected_neighbour_counting_radius2_1200.csv",
-#              (1200 * 0.95), exp_type='competitive',  correct_pick='C', display=True)
-#
-# base_calling("G:/time_vs_accuracy/5base/pos6/csv_files/GAP13_5ntseq_pos6seq_GAP13_localization_corrected_neighbour_counting_radius2_1200.csv",
-#              (1200*0.95), exp_type='competitive',  correct_pick='C', display=True)
-#
-# base_calling("G:/time_vs_accuracy/nonComp_GapT/csv_files/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes_neighbour_counting_radius2_1000.csv",
-#              (1000*0.95), exp_type='non-competitive', correct_pick='A', display=True)
 
 
 def time_VS_accuracy(dir_path, correct_pick, confidence, exp_type):
