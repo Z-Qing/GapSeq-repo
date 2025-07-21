@@ -39,10 +39,8 @@ def threshold_selection(data, degree=12, bin_size=10, display=True):
 
     # Candidate 2: First local maximum after minimum
     # Find where derivative changes from positive to negative
-    maxima = []
-    for i in range(1, len(post_min_y) - 1):
-        if post_min_y[i] > post_min_y[i - 1] and post_min_y[i] > post_min_y[i + 1]:
-            maxima.append(post_min_x[i])
+    is_max = (post_min_y[1:-1] > post_min_y[:-2]) & (post_min_y[1:-1] > post_min_y[2:])
+    maxima = post_min_x[1:-1][is_max]
     candidate2 = maxima[0] if len(maxima) > 0 else None
 
     # Select the earliest occurring candidate
@@ -212,28 +210,7 @@ def time_VS_accuracy(dir_path, correct_pick, confidence, exp_type, display=True)
 
 
 if __name__ == '__main__':
-    #path1 = "G:/time_vs_accuracy/5base/pos6/csv_files"
-    #path2 = "G:/time_vs_accuracy/nonComp/nonComp_GapT/csv_files"
-    #path3 = "G:/time_vs_accuracy/comp/comp_GapT/csv_files"
-    path4 = "G:/time_vs_accuracy/comp/comp_GapG/csv_files"
-    time_VS_accuracy(path4,
-                     correct_pick='C', confidence=0.6, exp_type='competitive', display=True)
+    base_calling(path1, maximum_length=(1100 * 0.95), exp_type='competitive', display=True,
+                 correct_pick='C')
 
-    #path1 = "G:/accuracy_table/nonComp/8nt_NComp_GAP_A_Seal100nM_GAP_A_localization-1_corrected_neighbour_counting_radius2_inf.csv"
-    #path2 = "G:/accuracy_table/nonComp/8nt_GAP_G_Ncomp_GAP_G_localization_corrected_neighbour_counting_radius2_1000.csv"
-    #path3 = "G:/accuracy_table/nonComp/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes_neighbour_counting_radius2_1000.csv"
-    # path4 = "G:/accuracy_table/nonComp/8nt_NComp_GAP_C_Seal100nM_GAP_c_localization_corrected_neighbour_counting_radius2_inf.csv"
-    # base_calling(path4,
-    #              maximum_length=(1000 * 0.95), exp_type='non-competitive', display=True,
-    #              correct_pick='G')
-
-    #path1 = "G:/accuracy_table/Comp/8nt_comp_GAP_G_GAP_G_localization_corrected_neighbour_counting_radius2_1200.csv"
-    #path2 = "G:/accuracy_table/Comp/8nt_comp_GAP_C_GAP_C_localization_corrected_neighbour_counting_radius2_inf.csv"
-    #path3 = "G:/accuracy_table/Comp/GAP_A_8nt_comp_df10_GAP_A_Localization_corrected_neighbour_counting_radius2_inf.csv"
-    # path4 = "G:/accuracy_table/Comp/GAP_T_8nt_comp_df10_GAP_T_Localization_corrected_neighbour_counting_radius2_1100.csv"
-    # base_calling(path4, maximum_length=(1100 * 0.95), exp_type='competitive', display=True,
-    #              correct_pick='A')
-
-    #path = "G:/time_vs_accuracy/5base/pos6/csv_files/GAP13_5ntseq_pos6seq_GAP13_localization_corrected_neighbour_counting_radius2_1200.csv"
-    # path = "G:/time_vs_accuracy/nonComp/nonComp_GapG/csv_files/8nt_GAP_G_Ncomp_GAP_G_localization_corrected_neighbour_counting_radius2_1000.csv"
 
