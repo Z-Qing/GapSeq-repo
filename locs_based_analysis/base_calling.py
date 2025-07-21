@@ -111,16 +111,19 @@ def non_competitive_selection(param, threshold):
     return choice, diff
 
 
-def base_calling(path, maximum_length, exp_type, correct_pick=None, bin_width=5,
-                  display=False, save_results=False):
+def base_calling(path, maximum_length, exp_type, correct_pick=None, threshold=None,
+                 bin_width=5, display=False, save_results=False):
     param = pd.read_csv(path, index_col=0)
     #remove fiducial markers
     param = param.loc[~(param.min(axis=1) > maximum_length)]
 
     # ----------------- threshold selection ------------------------------
-    locs_counts = param.to_numpy().flatten()
-    transition_point = threshold_selection(locs_counts, bin_size=bin_width)
-    print(transition_point)
+    if type(threshold) == int or type(threshold) == float:
+        transition_point = threshold
+    else:
+        locs_counts = param.to_numpy().flatten()
+        transition_point = threshold_selection(locs_counts, bin_size=bin_width)
+        print(transition_point)
 
     # ----------------- confidence VS accuracy rate plot -------------------
     if exp_type == 'competitive':
@@ -213,13 +216,31 @@ def time_VS_accuracy(dir_path, correct_pick, minimum_confidence, exp_type, displ
 
     df = pd.DataFrame({'frame': frame_num, 'accuracy': accuracy_rate, 'molecule_number': molecule_num})
     df.sort_values('frame', inplace=True)
-    df.to_csv(dir_path + '/frame_vs_accuracy_confidence{}.csv'.format(confidence), index=False)
+    df.to_csv(dir_path + '/frame_vs_accuracy_confidence{}.csv'.format(minimum_confidence), index=False)
     print(df)
     return
 
 
 if __name__ == '__main__':
+    #path1 = "G:/time_vs_accuracy/5base/pos6/csv_files"
+    #path2 = "G:/time_vs_accuracy/nonComp/nonComp_GapT/csv_files"
+    #path3 = "G:/time_vs_accuracy/comp/comp_GapT/csv_files"
+    # path4 = "G:/time_vs_accuracy/comp/comp_GapG/csv_files"
+    # time_VS_accuracy(path4,
+    #                  correct_pick='C', confidence=0.6, exp_type='competitive', display=True)
+
+    #path1 = "G:/accuracy_table/nonComp/8nt_NComp_GAP_A_Seal100nM_GAP_A_localization-1_corrected_neighbour_counting_radius2_inf.csv"
+    #path2 = "G:/accuracy_table/nonComp/8nt_GAP_G_Ncomp_GAP_G_localization_corrected_neighbour_counting_radius2_1000.csv"
+    #path3 = "G:/accuracy_table/nonComp/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes_neighbour_counting_radius2_1000.csv"
+    # path4 = "G:/accuracy_table/nonComp/8nt_NComp_GAP_C_Seal100nM_GAP_c_localization_corrected_neighbour_counting_radius2_inf.csv"
+    # base_calling(path4,
+    #              maximum_length=(1000 * 0.95), exp_type='non-competitive', display=True,
+    #              correct_pick='G')
+
     path1 = "G:/accuracy_table/Comp/8nt_comp_GAP_G_GAP_G_localization_corrected_neighbour_counting_radius2_1200.csv"
+    #path2 = "G:/accuracy_table/Comp/8nt_comp_GAP_C_GAP_C_localization_corrected_neighbour_counting_radius2_inf.csv"
+    #path3 = "G:/accuracy_table/Comp/GAP_A_8nt_comp_df10_GAP_A_Localization_corrected_neighbour_counting_radius2_inf.csv"
+    #path4 = "G:/accuracy_table/Comp/GAP_T_8nt_comp_df10_GAP_T_Localization_corrected_neighbour_counting_radius2_1100.csv"
     base_calling(path1, maximum_length=(1100 * 0.95), exp_type='competitive', display=True,
                  correct_pick='C', save_results=True)
 
