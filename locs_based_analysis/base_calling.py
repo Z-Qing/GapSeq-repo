@@ -132,7 +132,7 @@ def base_calling(path, maximum_length, exp_type, correct_pick=None, bin_width=5,
 
 
     if save_results:
-        results = param.copy()
+        results = param.loc[choice.index].copy()
         results['calling'] = choice
         results['confidence'] = confidence
         results.to_csv(path.replace('.csv', '_base_calling_result.csv'), index=True)
@@ -221,6 +221,6 @@ def time_VS_accuracy(dir_path, correct_pick, minimum_confidence, exp_type, displ
 if __name__ == '__main__':
     path1 = "G:/accuracy_table/Comp/8nt_comp_GAP_G_GAP_G_localization_corrected_neighbour_counting_radius2_1200.csv"
     base_calling(path1, maximum_length=(1100 * 0.95), exp_type='competitive', display=True,
-                 correct_pick='C')
+                 correct_pick='C', save_results=True)
 
 
