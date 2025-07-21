@@ -83,7 +83,9 @@ def competitive_selection(param, threshold):
     sorted = param.to_numpy()
     sorted.sort(axis=1)
     diff = sorted[:, 1] - sorted[:, 0]
-
+    diff = np.where(diff==0, 1, diff)
+    # avoid value 0 (in this scenario, the diff is 0
+    # or 1 won't make much difference)
     diff = np.log(diff)
 
     diff = diff / diff.max()
@@ -101,7 +103,7 @@ def non_competitive_selection(param, threshold):
     sorted = param.to_numpy()
     sorted.sort(axis=1)
     diff = sorted[:, -1] - sorted[:, -2] # the difference between largest number and second largest
-
+    diff = np.where(diff == 0, 1, diff)
     diff = np.log(diff)
 
     diff = diff / diff.max()
@@ -110,7 +112,7 @@ def non_competitive_selection(param, threshold):
 
 
 def base_calling(path, maximum_length, exp_type, correct_pick=None, bin_width=5,
-                  display=False):
+                  display=False, save_results=False):
     param = pd.read_csv(path, index_col=0)
     #remove fiducial markers
     param = param.loc[~(param.min(axis=1) > maximum_length)]
@@ -122,11 +124,18 @@ def base_calling(path, maximum_length, exp_type, correct_pick=None, bin_width=5,
 
     # ----------------- confidence VS accuracy rate plot -------------------
     if exp_type == 'competitive':
-        choice, diff = competitive_selection(param, transition_point)
+        choice, confidence = competitive_selection(param, transition_point)
     elif exp_type == 'non-competitive':
-        choice, diff = non_competitive_selection(param, transition_point)
+        choice, confidence = non_competitive_selection(param, transition_point)
     else:
         raise ValueError
+
+
+    if save_results:
+        results = param.copy()
+        results['calling'] = choice
+        results['confidence'] = confidence
+        results.to_csv(path.replace('.csv', '_base_calling_result.csv'), index=True)
 
 
     if display and isinstance(correct_pick, str):
@@ -136,7 +145,7 @@ def base_calling(path, maximum_length, exp_type, correct_pick=None, bin_width=5,
         accuracy_rate = []
         molecule_number = []
         for t in np.arange(0, 1, 0.1):
-            selected_choice = choice.loc[diff > t]
+            selected_choice = choice.loc[confidence > t]
             if len(selected_choice) == 0:
                 break
             else:
@@ -159,11 +168,11 @@ def base_calling(path, maximum_length, exp_type, correct_pick=None, bin_width=5,
                            'molecule_number': molecule_number})
         print(df)
 
-    return pd.DataFrame({'choice': choice, 'diff': diff})
+    return pd.DataFrame({'choice': choice, 'confidence': confidence})
 
 
 
-def time_VS_accuracy(dir_path, correct_pick, confidence, exp_type, display=True):
+def time_VS_accuracy(dir_path, correct_pick, minimum_confidence, exp_type, display=True):
     files = [x for x in os.listdir(dir_path) if x.endswith('.csv')]
 
     frame_num = []
@@ -178,7 +187,7 @@ def time_VS_accuracy(dir_path, correct_pick, confidence, exp_type, display=True)
                                   correct_pick=correct_pick)
             frame_num.append(int(num))
 
-            result = result[result['diff'] > confidence]
+            result = result[result['confidence'] > minimum_confidence]
             summary = result['choice'].value_counts()
 
             number = summary.sum()
@@ -210,6 +219,7 @@ def time_VS_accuracy(dir_path, correct_pick, confidence, exp_type, display=True)
 
 
 if __name__ == '__main__':
+    path1 = "G:/accuracy_table/Comp/8nt_comp_GAP_G_GAP_G_localization_corrected_neighbour_counting_radius2_1200.csv"
     base_calling(path1, maximum_length=(1100 * 0.95), exp_type='competitive', display=True,
                  correct_pick='C')
 
