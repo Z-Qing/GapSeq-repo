@@ -85,6 +85,7 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
         total_params.append(param)
 
     counting_params = pd.concat(total_params, axis=1)
+    #counting_params['10'] = LC.loc[mask, '10']
 
     return counting_params
 
@@ -120,14 +121,18 @@ def process_analysis_Localization(dir_path, pattern, ref_path=None, target_forma
 
 
 
-def process_analysis_ALEX(dir_path, search_radius=2, gradient=1000, gpu=True):
+def process_analysis_ALEX(dir_path, ref_path=None, search_radius=2, mov_gradient=1000, gpu=True,
+                          max_frame=np.inf, save_hdf5=False):
     files = os.listdir(dir_path)
-    ref = [x for x in files if x.endswith('.hdf5')]
-    if len(ref) != 1:
-        raise ValueError("There should be one and only one reference file in the directory")
+    if ref_path is None:
+        ref = [x for x in files if x.endswith('.hdf5')]
+        if len(ref) != 1:
+            raise ValueError("There should be one and only one reference file in the directory")
+        else:
+            ref_keyword = ref[0].replace('.hdf5', '')
+            ref = os.path.join(dir_path, ref[0])
     else:
-        ref_keyword = ref[0].replace('.hdf5', '')
-        ref = os.path.join(dir_path, ref[0])
+        ref = ref_path
 
 
     subfolder_pattern = {}
@@ -140,7 +145,8 @@ def process_analysis_ALEX(dir_path, search_radius=2, gradient=1000, gpu=True):
 
         counts = locs_based_analysis_preAligned(ref, mov_list=mov_list, pattern=pattern,
                                     search_radius=search_radius, gpu=gpu, ref_gradient=400,
-                                       roi=[0, 428, 684, 856], save_hdf5=False, mov_gradient=gradient)
+                                    max_frame=max_frame, ref_roi=[0, 0, 684, 428], mov_gradient=mov_gradient,
+                                       roi=[0, 428, 684, 856], save_hdf5=save_hdf5)
 
         counts.to_csv(os.path.join(dir_path, folder) + '/{}_neighbour_counting_radius{}_linked.csv'.format(ref_keyword, search_radius))
 
@@ -151,12 +157,13 @@ def process_analysis_ALEX(dir_path, search_radius=2, gradient=1000, gpu=True):
 if __name__ == "__main__":
     #process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
 
-    process_analysis_Localization("G:/time_vs_accuracy/5base/pos6",
-                                  ref_path="G:/time_vs_accuracy/5base/pos6/GAP13_5ntseq_pos6seq_GAP13_localization_corrected.hdf5",
+    process_analysis_Localization("Z:/Qing_2/GAPSeq/competitive/20250323_8nt_comp_GAP_C/corrected_movies",
+                                  ref_path=None,
                                   localization_keyword='localization', # use for find reference molecules or exclude the localization movie
                                   gpu=True,
-                                  pattern=r'_S6(.*?)1uM', # r'degen100nM_([A-Za-z])_',
-                                  max_frame=200,
+                                  pattern= r'_S3([A-Z])-', #r'_([a-zA-Z]+)500nM_',
+                                  #r'_(\d+(?:\.\d+)?(?:nM|uM))_corrected',
+                                  max_frame=np.inf,
                                   save_hdf5=True,
-                                  target_format='.hdf5',
+                                  target_format='.tif',
                                   search_radius=2, gradient=1000)
