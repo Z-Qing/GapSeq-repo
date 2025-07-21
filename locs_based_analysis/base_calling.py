@@ -138,6 +138,7 @@ def base_calling(path, maximum_length, exp_type, correct_pick=None, threshold=No
         results = param.loc[choice.index].copy()
         results['calling'] = choice
         results['confidence'] = confidence
+        result['calling'].replace({'A': 'T', 'C': 'G', 'T': 'A', 'G': 'C'}, inplace=True)
         results.to_csv(path.replace('.csv', '_base_calling_result.csv'), index=True)
 
 
