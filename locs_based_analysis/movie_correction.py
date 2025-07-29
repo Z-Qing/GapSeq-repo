@@ -101,15 +101,22 @@ def stackreg_channel_alignment(mov, transform_matrix, num_processes=4):
 
 
 
-def contrast_enhance(image):
-    # keep the fiducial markers
-    threshold = np.percentile(image, 90)
-    image = np.where(image > threshold, image, 0)
+def contrast_enhance(img, gamma_high=0.5, gamma_low=2.0):
+    # make fiducial markers more significant
 
-    max_img = np.max(image)
-    image = image / max_img * 65535.0
+    img_scaled = (img - img.min()) / (img.max() - img.min()) * 255
 
-    return image.astype(np.uint16)
+    # Dual gamma correction
+    threshold = np.percentile(img, 90)  # Midpoint for gamma split
+    bright_mask = img_scaled > threshold
+    dark_mask = ~bright_mask
+
+    img_gamma = np.zeros_like(img_scaled)
+    img_gamma[bright_mask] = 255 * (img_scaled[bright_mask] / 255) ** (1 / gamma_high)
+    img_gamma[dark_mask] = 255 * (img_scaled[dark_mask] / 255) ** gamma_low
+    img_gamma = np.clip(img_gamma, 0, 255).astype(np.uint8)
+
+    return img_gamma
 
 
 def align_red_green(movie_path, alignment_source, background_remove, gpu):
@@ -252,7 +259,7 @@ def process_correction(dir_path, localization_key='localization', rg_alignment_s
 
 
 if __name__ == "__main__":
-    process_correction("Z:/Svea/Experiments/20250710_Steve_5SpcBio_1A2TSpc/Movies Position 2",
+    process_correction("G:/image_enhancement_test",
                        rg_alignment_source='first',
                        gg_alignment_source='first',
                        localization_key='localization', gpu=True,
