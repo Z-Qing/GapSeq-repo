@@ -101,20 +101,26 @@ def stackreg_channel_alignment(mov, transform_matrix, num_processes=4):
 
 
 
-def contrast_enhance(img, gamma_high=0.5, gamma_low=2.0):
+def contrast_enhance(img, gamma_high=0.2, gamma_low=5.0):
     # make fiducial markers more significant
 
     img_scaled = (img - img.min()) / (img.max() - img.min()) * 255
 
     # Dual gamma correction
-    threshold = np.percentile(img, 90)  # Midpoint for gamma split
+    threshold = np.percentile(img, 70)  # point for gamma split
     bright_mask = img_scaled > threshold
     dark_mask = ~bright_mask
 
     img_gamma = np.zeros_like(img_scaled)
-    img_gamma[bright_mask] = 255 * (img_scaled[bright_mask] / 255) ** (1 / gamma_high)
-    img_gamma[dark_mask] = 255 * (img_scaled[dark_mask] / 255) ** gamma_low
-    img_gamma = np.clip(img_gamma, 0, 255).astype(np.uint8)
+    img_gamma[bright_mask] = 65535 * np.power(img_scaled[bright_mask] / 65535.0, gamma_high)
+                                    #(img_scaled[bright_mask] / 255) ** (1 / gamma_high)
+    img_gamma[dark_mask] = 65535 * np.power(img_scaled[dark_mask] / 65535.0, gamma_low)
+                                #255 * (img_scaled[dark_mask] / 255) ** gamma_low
+    img_gamma = np.clip(img_gamma, 0, 65535).astype(np.uint16)
+
+    plt.imshow(img_gamma, cmap='gray')
+    plt.grid(None)
+    plt.show()
 
     return img_gamma
 
@@ -259,10 +265,10 @@ def process_correction(dir_path, localization_key='localization', rg_alignment_s
 
 
 if __name__ == "__main__":
-    process_correction("G:/image_enhancement_test",
+    process_correction("G:/20250720_IPE_seq_exp7",
                        rg_alignment_source='first',
                        gg_alignment_source='first',
-                       localization_key='localization', gpu=True,
+                       localization_key='ALEX', gpu=True,
                        ref_background_remove=False, mov_background_remove=False)
 
     # channel_1, channel_2 = prepare_two_channel_movie("G:/Miri_GapSeq/20240802_GapSeq_8mer_Tween/100nM/undrift/"
