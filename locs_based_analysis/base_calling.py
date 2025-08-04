@@ -2,75 +2,47 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import warnings
 from scipy.optimize import curve_fit
+from scipy import stats
 
 
-def polynomial(x, *coeffs):
-    return np.polyval(coeffs[::-1], x)  # coeffs ordered from highest to lowest degree
+def model_func(t, A, K, C):
+    return A * np.exp(K * t) + C
 
-def threshold_selection(data, degree=12, bin_size=10, display=True):
-    # Create histogram
+def fit_exp_nonlinear(t, y):
+    C_guess = 0  # Since we expect it to approach 0
+    A_guess = y[0] - C_guess  # Initial value
+    K_guess = -0.1  # Initial decay rate guess (negative since we expect decay)
+
+    opt_parms, parm_cov = curve_fit(model_func, t, y, maxfev=1000, p0=(A_guess, K_guess, C_guess))
+    A, K, C = opt_parms
+    return A, K, C
+
+
+def threshold_selection(data, bin_size=10, n_decay_length=3):
     counts, bin_edges = np.histogram(data, bins=np.arange(0, data.max() + bin_size, bin_size))
     positions = (bin_edges[1:] + bin_edges[:-1]) / 2
 
     # Calculate first derivative
     first_deriv = np.gradient(counts, positions)
+    global_min_idx = np.argmin(first_deriv)
+    global_min_x = positions[global_min_idx]
 
-    # Fit polynomial to first derivative
-    p0 = [1] * (degree + 1)
-    popt, _ = curve_fit(polynomial, positions, first_deriv, p0=p0)
-    poly_coeffs = popt[::-1]  # Convert to standard np.poly order
-    first_deriv_poly = np.poly1d(poly_coeffs)
+    mask = positions >= global_min_x
+    # Linear Fit (Note that we have to provide the y-offset ("C") value!!
+    A, K, C = fit_exp_nonlinear(positions[mask], first_deriv[mask])
 
-    # Find global minimum (using fitted polynomial)
-    x_fine = np.linspace(positions.min(), positions.max(), 1000)
-    y_fine = first_deriv_poly(x_fine)
-    global_min_idx = np.argmin(y_fine)
-    global_min_x = x_fine[global_min_idx]
+    fit_y = model_func(positions[mask], A, K, C)
 
-    # Candidate 1: First zero crossing after minimum
-    # We'll scan the polynomial values after the minimum
-    post_min_x = x_fine[global_min_idx:]
-    post_min_y = y_fine[global_min_idx:]
+    plt.plot(positions[mask], fit_y, '--', label='fitted exponential decay')
+    plt.plot(positions, first_deriv, '.', label='first derivative')
+    plt.legend(loc='best')
+    plt.show()
 
-    zero_crossings = np.where(np.diff(np.sign(post_min_y)) > 0)[0]
-    candidate1 = post_min_x[zero_crossings[0]] if len(zero_crossings) > 0 else None
+    decay_length = np.abs(1/K)
+    print('the decay length is {}'.format(np.round(decay_length, 2)))
 
-    # Candidate 2: First local maximum after minimum
-    # Find where derivative changes from positive to negative
-    is_max = (post_min_y[1:-1] > post_min_y[:-2]) & (post_min_y[1:-1] > post_min_y[2:])
-    maxima = post_min_x[1:-1][is_max]
-    candidate2 = maxima[0] if len(maxima) > 0 else None
-
-    # Select the earliest occurring candidate
-    transition_x = None
-    if candidate1 and candidate2:
-        transition_x = min(candidate1, candidate2)
-    elif candidate1:
-        transition_x = candidate1
-    elif candidate2:
-        transition_x = candidate2
-    else:
-        transition_x = global_min_x  # Fallback
-
-    if display:
-        fig, ax = plt.subplots(2, 1)
-        ax[1].plot(positions, first_deriv, 'b-', alpha=0.5, label='First Derivative (data)')
-        ax[1].plot(x_fine, y_fine, 'r-', label='Polynomial Fit')
-        ax[1].axhline(0, color='gray', linestyle='--')
-        ax[1].axvline(global_min_x, color='green', linestyle=':', label='Global Min')
-        if candidate1:
-            ax[1].axvline(candidate1, color='purple', linestyle=':', label='Zero Crossing')
-        if candidate2:
-            ax[1].axvline(candidate2, color='orange', linestyle=':', label='First Max')
-        ax[1].axvline(transition_x, color='black', linewidth=2, label='Selected Transition')
-        ax[0].bar(positions, counts, width=bin_size)
-        ax[0].axvline(transition_x, color='black', linewidth=2)
-        plt.legend()
-        plt.show()
-
-    return transition_x
+    return decay_length * n_decay_length
 
 
 def competitive_selection(param, threshold):
@@ -176,7 +148,8 @@ def base_calling(path, maximum_length, exp_type, correct_pick=None, threshold=No
 
 
 
-def time_VS_accuracy(dir_path, correct_pick, minimum_confidence, exp_type, display=True):
+def time_VS_accuracy(dir_path, correct_pick, minimum_confidence, exp_type,
+                     display=True, threshold=None):
     files = [x for x in os.listdir(dir_path) if x.endswith('.csv')]
 
     frame_num = []
@@ -188,7 +161,7 @@ def time_VS_accuracy(dir_path, correct_pick, minimum_confidence, exp_type, displ
         if num.isdigit():
             result = base_calling(os.path.join(dir_path, f), int(num) * 0.95,
                                   exp_type=exp_type, display=display,
-                                  correct_pick=correct_pick)
+                                  correct_pick=correct_pick, threshold=threshold)
             frame_num.append(int(num))
 
             result = result[result['confidence'] > minimum_confidence]
@@ -222,6 +195,7 @@ def time_VS_accuracy(dir_path, correct_pick, minimum_confidence, exp_type, displ
     return
 
 
+
 if __name__ == '__main__':
     #path1 = "G:/time_vs_accuracy/5base/pos6/csv_files"
     #path2 = "G:/time_vs_accuracy/nonComp/nonComp_GapT/csv_files"
@@ -230,7 +204,7 @@ if __name__ == '__main__':
     # time_VS_accuracy(path4,
     #                  correct_pick='C', confidence=0.6, exp_type='competitive', display=True)
 
-    #path1 = "G:/accuracy_table/nonComp/8nt_NComp_GAP_A_Seal100nM_GAP_A_localization-1_corrected_neighbour_counting_radius2_inf.csv"
+    path1 = "G:/accuracy_table/nonComp/8nt_NComp_GAP_A_Seal100nM_GAP_A_localization-1_corrected_neighbour_counting_radius2_inf.csv"
     #path2 = "G:/accuracy_table/nonComp/8nt_GAP_G_Ncomp_GAP_G_localization_corrected_neighbour_counting_radius2_1000.csv"
     #path3 = "G:/accuracy_table/nonComp/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes_neighbour_counting_radius2_1000.csv"
     # path4 = "G:/accuracy_table/nonComp/8nt_NComp_GAP_C_Seal100nM_GAP_c_localization_corrected_neighbour_counting_radius2_inf.csv"
@@ -238,11 +212,13 @@ if __name__ == '__main__':
     #              maximum_length=(1000 * 0.95), exp_type='non-competitive', display=True,
     #              correct_pick='G')
 
-    path1 = "G:/accuracy_table/Comp/8nt_comp_GAP_G_GAP_G_localization_corrected_neighbour_counting_radius2_1200.csv"
+    #path1 = "G:/accuracy_table/Comp/8nt_comp_GAP_G_GAP_G_localization_corrected_neighbour_counting_radius2_1200.csv"
     #path2 = "G:/accuracy_table/Comp/8nt_comp_GAP_C_GAP_C_localization_corrected_neighbour_counting_radius2_inf.csv"
     #path3 = "G:/accuracy_table/Comp/GAP_A_8nt_comp_df10_GAP_A_Localization_corrected_neighbour_counting_radius2_inf.csv"
     #path4 = "G:/accuracy_table/Comp/GAP_T_8nt_comp_df10_GAP_T_Localization_corrected_neighbour_counting_radius2_1100.csv"
-    base_calling(path1, maximum_length=(1100 * 0.95), exp_type='competitive', display=True,
-                 correct_pick='C', save_results=True)
+    #path5 = "G:/time_vs_accuracy/5base/pos6/csv_files/GAP13_5ntseq_pos6seq_GAP13_localization_corrected_neighbour_counting_radius2_1200.csv"
 
+    path="G:/time_vs_accuracy/nonComp/nonComp_GapG/csv_files/8nt_GAP_G_Ncomp_GAP_G_localization_corrected_neighbour_counting_radius2_1000.csv"
+    base_calling(path, maximum_length=(1000 * 0.95), exp_type='non-competitive', display=True,
+                 correct_pick='C', save_results=False, threshold=None)
 
