@@ -22,8 +22,8 @@ def create_circular_masks(image_shape, yx, inner_radius, gap_width, outer_radius
     return center_mask, bg_mask
 
 
-def calculate_intensities(movie_path, hdf5_path, inner_radius=3, gap_width=1,
-                          roi=(0, 428, 684, 856), outer_radius=6, raw=False):
+def calculate_intensities(movie_path, hdf5_path, inner_radius=2, gap_width=1,
+                          roi=(0, 428, 684, 856), outer_radius=5, raw=False):
     """
     adapted from DeepFRET
     raw:
@@ -53,6 +53,7 @@ def calculate_intensities(movie_path, hdf5_path, inner_radius=3, gap_width=1,
         )
 
         # Calculate intensities
+        # Calculate intensities
         roi_pixels = image_stack[:, center_mask]
         roi_sum = np.sum(roi_pixels, axis=1)
 
@@ -69,17 +70,26 @@ def calculate_intensities(movie_path, hdf5_path, inner_radius=3, gap_width=1,
             backgrounds[:, i] = 0
 
 
-    save_path = hdf5_path.replace('.hdf5', '_DeepFRET_intensity.csv')
     signal_df = pd.DataFrame(signals,  columns=locs.index)
-    # filter out signal that are negative in general (come from false
-    # localizations at the edge because of padding when do alignment)
+    # Filter 1: Remove signals with too many negative values
     negative_frac = (signal_df < 0).mean(axis=0)
-    signal_df_filtered = signal_df.loc[:, negative_frac < 0.5]
+    signal_df_filtered = signal_df.loc[:, negative_frac < 0.3]
+
+    # Filter 2: Remove constant signals (low standard deviation)
+    signal_stds = signal_df_filtered.std(axis=0)
+    signal_df_filtered = signal_df_filtered.loc[:, signal_stds >= 10]
+
+    # Save the filtered results
+    save_path = movie_path.replace('.tif', '_DeepFRET_intensity.csv')
     signal_df_filtered.to_csv(save_path, index=False)
 
-    return signals, backgrounds
+    # Also filter the background array to match
+    valid_columns = signal_df_filtered.columns
+    backgrounds_filtered = backgrounds[:, [i for i, col in enumerate(locs.index) if col in valid_columns]]
+
+    return signal_df_filtered, backgrounds_filtered
 
 
 if __name__ == '__main__':
-    calculate_intensities(movie_path="G:/CAP binding/20250707_CAP_library_2.5nM/CAP_library_2.5nM_CAP_binding_2.5nM_halfdiluted-2_corrected.tif",
-                          hdf5_path="G:/CAP binding/20250707_CAP_library_2.5nM/CAP_library_2.5nM_library_localization_corrected_first_frame_locs.hdf5")
+    calculate_intensities(movie_path="J:/non_competitive/20250319_8nt_NComp_GAP_G_Seal100nM/8nt_NComp_GAP_G_Seal100nM_GAP_G_seal3G_100nM_corrected.tif",
+                          hdf5_path="J:/non_competitive/20250319_8nt_NComp_GAP_G_Seal100nM/8nt_NComp_GAP_G_Seal100nM_GAP_G_localization_corrected_boxsize5.hdf5")

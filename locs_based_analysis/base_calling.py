@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
-from scipy import stats
 
 
 def model_func(t, A, K, C):
@@ -12,7 +11,7 @@ def model_func(t, A, K, C):
 def fit_exp_nonlinear(t, y):
     C_guess = 0  # Since we expect it to approach 0
     A_guess = y[0] - C_guess  # Initial value
-    K_guess = -0.1  # Initial decay rate guess (negative since we expect decay)
+    K_guess = -0.01  # Initial decay rate guess (negative since we expect decay)
 
     opt_parms, parm_cov = curve_fit(model_func, t, y, maxfev=1000, p0=(A_guess, K_guess, C_guess))
     A, K, C = opt_parms
@@ -20,6 +19,7 @@ def fit_exp_nonlinear(t, y):
 
 
 def threshold_selection(data, bin_size=10, n_decay_length=3):
+    data = data[data > 0]
     counts, bin_edges = np.histogram(data, bins=np.arange(0, data.max() + bin_size, bin_size))
     positions = (bin_edges[1:] + bin_edges[:-1]) / 2
 
@@ -34,15 +34,18 @@ def threshold_selection(data, bin_size=10, n_decay_length=3):
 
     fit_y = model_func(positions[mask], A, K, C)
 
-    plt.plot(positions[mask], fit_y, '--', label='fitted exponential decay')
-    plt.plot(positions, first_deriv, '.', label='first derivative')
-    plt.legend(loc='best')
+    fig, ax = plt.subplots(2, 1)
+    ax[0].bar(positions, counts, width=bin_size)
+
+    ax[1].plot(positions[mask], fit_y, '--', label='fitted exponential decay')
+    ax[1].plot(positions, first_deriv, label='first derivative')
+    ax[1].legend(loc='best')
     plt.show()
 
-    decay_length = np.abs(1/K)
-    print('the decay length is {}'.format(np.round(decay_length, 2)))
+    transition_x = np.round(n_decay_length* np.abs(1/K) + global_min_x)
+    print('the threshold is {}'.format(transition_x))
 
-    return decay_length * n_decay_length
+    return transition_x
 
 
 def competitive_selection(param, threshold):
@@ -95,7 +98,7 @@ def base_calling(path, maximum_length, exp_type, correct_pick=None, threshold=No
     else:
         locs_counts = param.to_numpy().flatten()
         transition_point = threshold_selection(locs_counts, bin_size=bin_width)
-        print(transition_point)
+
 
     # ----------------- confidence VS accuracy rate plot -------------------
     if exp_type == 'competitive':
@@ -204,7 +207,7 @@ if __name__ == '__main__':
     # time_VS_accuracy(path4,
     #                  correct_pick='C', confidence=0.6, exp_type='competitive', display=True)
 
-    path1 = "G:/accuracy_table/nonComp/8nt_NComp_GAP_A_Seal100nM_GAP_A_localization-1_corrected_neighbour_counting_radius2_inf.csv"
+    #path1 = "G:/accuracy_table/nonComp/8nt_NComp_GAP_A_Seal100nM_GAP_A_localization-1_corrected_neighbour_counting_radius2_inf.csv"
     #path2 = "G:/accuracy_table/nonComp/8nt_GAP_G_Ncomp_GAP_G_localization_corrected_neighbour_counting_radius2_1000.csv"
     #path3 = "G:/accuracy_table/nonComp/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes_neighbour_counting_radius2_1000.csv"
     # path4 = "G:/accuracy_table/nonComp/8nt_NComp_GAP_C_Seal100nM_GAP_c_localization_corrected_neighbour_counting_radius2_inf.csv"
@@ -213,12 +216,12 @@ if __name__ == '__main__':
     #              correct_pick='G')
 
     #path1 = "G:/accuracy_table/Comp/8nt_comp_GAP_G_GAP_G_localization_corrected_neighbour_counting_radius2_1200.csv"
-    #path2 = "G:/accuracy_table/Comp/8nt_comp_GAP_C_GAP_C_localization_corrected_neighbour_counting_radius2_inf.csv"
+    path2 = "G:/accuracy_table/Comp/8nt_comp_GAP_C_GAP_C_localization_corrected_neighbour_counting_radius2_inf.csv"
     #path3 = "G:/accuracy_table/Comp/GAP_A_8nt_comp_df10_GAP_A_Localization_corrected_neighbour_counting_radius2_inf.csv"
     #path4 = "G:/accuracy_table/Comp/GAP_T_8nt_comp_df10_GAP_T_Localization_corrected_neighbour_counting_radius2_1100.csv"
     #path5 = "G:/time_vs_accuracy/5base/pos6/csv_files/GAP13_5ntseq_pos6seq_GAP13_localization_corrected_neighbour_counting_radius2_1200.csv"
 
-    path="G:/time_vs_accuracy/nonComp/nonComp_GapG/csv_files/8nt_GAP_G_Ncomp_GAP_G_localization_corrected_neighbour_counting_radius2_1000.csv"
-    base_calling(path, maximum_length=(1000 * 0.95), exp_type='non-competitive', display=True,
-                 correct_pick='C', save_results=False, threshold=None)
+    #path="G:/time_vs_accuracy/nonComp/nonComp_GapG/csv_files/8nt_GAP_G_Ncomp_GAP_G_localization_corrected_neighbour_counting_radius2_1000.csv"
+    base_calling(path2, maximum_length=(1200 * 0.95), exp_type='competitive', display=True,
+                 correct_pick='G', save_results=False, threshold=None)
 
