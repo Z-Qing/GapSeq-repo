@@ -22,8 +22,7 @@ from matplotlib.colors import LogNorm
 import numpy as np
 from scipy.stats import norm
 from scipy.special import logsumexp
-
-from scipy.interpolate import UnivariateSpline
+#from scipy.interpolate import UnivariateSpline
 from sklearn.cluster import AgglomerativeClustering
 import pandas as pd
 
@@ -113,7 +112,7 @@ class time_series_bocd():
 
         return
 
-    def get_stage_parameters(self):
+    def get_stage_parameters(self, n_threshold):
         starts = self.cps[:-1]
         ends = self.cps[1:]
         # Calculate median intensities for each segment
@@ -125,61 +124,56 @@ class time_series_bocd():
         stage_params = pd.DataFrame(stage_params, columns=['intensity', 'start', 'end', 'stage']
                                     ).astype({'start': int, 'end': int, 'stage': int})
 
+
         # -------------- classify intensities --------------------
         if len(stage_params) == 1:
-            pass
+            stage_params['class'] = 0
+            self.stage_params = stage_params
         else:
             std_list = []
-            for i in range(1, len(stage_params)):
-                std = self.trace[stage_params['start'][i]:stage_params['end'][i]].std()
-                std_list.append(std)
+            for i in np.arange(len(stage_params)):
+                segment = self.trace[stage_params['start'][i]:stage_params['end'][i]]
+                if len(segment) > 1:  # Need at least 2 points for std
+                    std_list.append(segment.std())
 
-            std_list = np.array(std_list)
-            std_list = std_list[~np.isnan(std_list)]
-            # std_list = std_list[std_list != 0]
-            #
-            threshold = 2 * std_list.mean()
+
+            threshold = n_threshold * np.median(std_list)
+
             data = stage_params['intensity'].values.reshape(-1, 1)
-            cluster = AgglomerativeClustering(linkage='average', distance_threshold=threshold,
-                                              n_clusters=None).fit(data)
+            cluster = AgglomerativeClustering(linkage='average',distance_threshold=threshold,
+                    n_clusters=None).fit(data)
+
             labels = cluster.labels_
-
-            cluster_means = {}
-            for lbl in np.unique(labels):
-                cluster_means[lbl] = data[labels == lbl].mean()
-
+            cluster_means = {lbl: data[labels == lbl].mean() for lbl in np.unique(labels)}
             sorted_labels = sorted(cluster_means, key=cluster_means.get)
-            label_map = {old_label: new_label for new_label, old_label in enumerate(sorted_labels)}
+            label_map = {old: new for new, old in enumerate(sorted_labels)}
             new_labels = np.array([label_map[lbl] for lbl in labels])
+            stage_params['class'] = np.where(new_labels >= 2, 2, new_labels)
 
-            stage_params['class'] = new_labels  # np.where(new_labels >= 2, 2, new_labels)
-            #print(new_labels)
+            # ---------------------- update the stage parameters ------------------
+            stage_params = stage_params.sort_values(by='start')
 
-        # ---------------------- update the stage parameters ------------------
-        stage_params = stage_params.sort_values(by='start')
+            # merge consecutive stages with belong to the same class
+            stage_params['group'] = (
+                (stage_params['class'] != stage_params['class'].shift())
+            ).cumsum()
 
-        # merge consecutive stages with belong to the same class
-        stage_params['group'] = (
-            (stage_params['class'] != stage_params['class'].shift())
-        ).cumsum()
+            # Perform the aggregation to merge stages
+            stage_params = stage_params.groupby('group').agg({
+                'intensity': 'first',
+                'start': 'min',
+                'end': 'max',
+                'class': 'first',
+            }).reset_index(drop=True)
 
-        # Perform the aggregation to merge stages
-        stage_params = stage_params.groupby('group').agg({
-            'intensity': 'mean',
-            'start': 'min',
-            'end': 'max',
-            'class': 'first',
-        }).reset_index(drop=True)
+            # Recalculate the real mean intensity using the original signal
+            stage_params['intensity'] = stage_params.apply(
+                lambda row: np.median(self.trace[int(row['start']):int(row['end'])]), axis=1)
 
-        # Recalculate the real mean intensity using the original signal
-        stage_params['intensity'] = stage_params.apply(
-            lambda row: np.mean(self.trace[int(row['start'] + 1):int(row['end'] - 1)]), axis=1)
-
-        stage_params.reset_index(drop=True, inplace=True)
-        self.stage_params = stage_params
+            stage_params.reset_index(drop=True, inplace=True)
+            self.stage_params = stage_params
 
         # Update changepoints (cps) by removing those between merged stages
-        print(self.cps)
         new_cps = [0]  # Start with the first time point
         for _, row in stage_params.iterrows():
             new_cps.append(int(row['end']))
@@ -189,35 +183,70 @@ class time_series_bocd():
         return
 
 
-    def plot_posterior(self):
-        fig, axes = plt.subplots(2, 1, figsize=(20, 10))
-
+    def plot_posterior(self, title):
+        # Create figure with 2 subplots
+        fig, axes = plt.subplots(2, 1, figsize=(20, 10), gridspec_kw={'height_ratios': [3, 1]})
         ax1, ax2 = axes
 
-        ax1.scatter(np.arange(0, self.T), self.trace)
-        ax1.plot(np.arange(0, self.T), self.trace)
+        # Plot the raw time series data
+        ax1.plot(np.arange(0, self.T), self.trace, 'b-', alpha=0.5, label='Raw data')
         ax1.set_xlim([0, self.T])
         ax1.margins(0)
+        ax1.set_ylabel('Value')
+        ax1.grid(True, linestyle='--', alpha=0.7)
 
-        # Plot predictions.
-        ax1.plot(np.arange(0, self.T), self.pmean, c='k')
+        # Plot predictions with uncertainty
+        ax1.plot(np.arange(0, self.T), self.pmean, 'k-', linewidth=2, label='Predicted mean')
         _2std = 2 * np.sqrt(self.pvar)
-        ax1.plot(np.arange(0, self.T), self.pmean - _2std, c='k', ls='--')
-        ax1.plot(np.arange(0, self.T), self.pmean + _2std, c='k', ls='--')
+        ax1.fill_between(np.arange(0, self.T),
+                         self.pmean - _2std,
+                         self.pmean + _2std,
+                         color='gray', alpha=0.2, label='±2 std')
 
+        # Plot the segmentation with different colors for each class
+        if hasattr(self, 'stage_params') and not self.stage_params.empty:
+            # Define a color palette for different classes
+            class_colors = {0: 'green', 1: 'orange', 2: 'red'}
+
+            for _, row in self.stage_params.iterrows():
+                start = int(row['start'])
+                end = int(row['end'])
+                class_id = int(row['class'])
+
+                # Plot the segment
+                ax1.axvspan(start, end,
+                            facecolor=class_colors[class_id],
+                            alpha=0.2)
+
+                # Add label only once per class
+                if class_id == 0 and _ == 0:
+                    ax1.plot([], [], color=class_colors[class_id], alpha=0.5)
+                elif class_id == 1 and _ == 0:
+                    ax1.plot([], [], color=class_colors[class_id], alpha=0.5)
+                elif class_id == 2 and _ == 0:
+                    ax1.plot([], [], color=class_colors[class_id], alpha=0.5)
+
+        # Plot changepoints
+        for cp in self.cps:
+            ax1.axvline(cp, c='red', ls='--', alpha=0.7, linewidth=1)
+
+        ax1.legend(loc='upper right')
+        ax1.set_title(title)
+
+        # Plot the run length posterior
         ax2.imshow(np.rot90(self.R), aspect='auto', cmap='gray_r',
                    norm=LogNorm(vmin=0.0001, vmax=1))
         ax2.set_xlim([0, self.T])
         ax2.margins(0)
+        ax2.set_xlabel('Time')
+        ax2.set_ylabel('Run length')
 
+        # Add changepoints to posterior plot
         for cp in self.cps:
-            ax1.axvline(cp, c='red', ls='dotted')
-            ax2.axvline(cp, c='red', ls='dotted')
+            ax2.axvline(cp, c='red', ls='--', alpha=0.7, linewidth=1)
 
         plt.tight_layout()
         plt.show()
-
-        return
 
 
 class GaussianUnknownMean:
