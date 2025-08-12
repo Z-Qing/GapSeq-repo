@@ -107,7 +107,7 @@ class time_series_bocd():
             if run_lengths[t] < run_lengths[t - 1] + 1:
                 changepoints.append(t)
 
-        changepoints.append(self.T)
+        changepoints.append(self.T + 1)
         self.cps = changepoints
 
         return
@@ -246,6 +246,8 @@ class time_series_bocd():
             ax2.axvline(cp, c='red', ls='--', alpha=0.7, linewidth=1)
 
         plt.tight_layout()
+        # save_path = "J:/CAP binding/20250709_CAP_library_1base/" + title + ".png"
+        # plt.savefig(save_path, dpi=600)
         plt.show()
 
 
