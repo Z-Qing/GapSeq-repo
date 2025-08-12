@@ -43,6 +43,7 @@ def threshold_selection(data, bin_size=10, n_decay_length=3):
     plt.show()
 
     transition_x = np.round(n_decay_length* np.abs(1/K) + global_min_x)
+    print('decay length is {}'.format(np.abs(1/K)))
     print('the threshold is {}'.format(transition_x))
 
     return transition_x
@@ -200,28 +201,19 @@ def time_VS_accuracy(dir_path, correct_pick, minimum_confidence, exp_type,
 
 
 if __name__ == '__main__':
-    #path1 = "G:/time_vs_accuracy/5base/pos6/csv_files"
-    #path2 = "G:/time_vs_accuracy/nonComp/nonComp_GapT/csv_files"
-    #path3 = "G:/time_vs_accuracy/comp/comp_GapT/csv_files"
-    # path4 = "G:/time_vs_accuracy/comp/comp_GapG/csv_files"
-    # time_VS_accuracy(path4,
-    #                  correct_pick='C', confidence=0.6, exp_type='competitive', display=True)
+    # path=("G:/20250428_8ntGAP_G_Noncompstand/8ntGAP_G_Noncompstand_GAP_G_localization_corrected_neighbour_counting_radius2_inf.csv")
+    # param = pd.read_csv(path, index_col=0)
+    #
+    # maximum_length = (1200 * 0.95)
+    # param = param.loc[~(param.min(axis=1) > maximum_length)]
+    #
+    # param = param.loc[param.max(axis=1) >= 361]
+    #
+    # param.to_csv(path.replace('.csv', '_filtered.csv'))
 
-    #path1 = "G:/accuracy_table/nonComp/8nt_NComp_GAP_A_Seal100nM_GAP_A_localization-1_corrected_neighbour_counting_radius2_inf.csv"
-    #path2 = "G:/accuracy_table/nonComp/8nt_GAP_G_Ncomp_GAP_G_localization_corrected_neighbour_counting_radius2_1000.csv"
-    #path3 = "G:/accuracy_table/nonComp/8ntGAP_T_Ncomp_seal100nM_Localization_corrected_picasso_bboxes_neighbour_counting_radius2_1000.csv"
-    # path4 = "G:/accuracy_table/nonComp/8nt_NComp_GAP_C_Seal100nM_GAP_c_localization_corrected_neighbour_counting_radius2_inf.csv"
-    # base_calling(path4,
-    #              maximum_length=(1000 * 0.95), exp_type='non-competitive', display=True,
-    #              correct_pick='G')
+    path = ("J:/CAP binding/20250713_CAP_library_1baseNNN/sequencing/localization2_corrected_neighbour_counting_radius2_inf.csv")
+    base_calling(path, maximum_length=(1200 * 0.95), exp_type='competitive', display=True,
+                  correct_pick=None, save_results=True, threshold=None)
 
-    #path1 = "G:/accuracy_table/Comp/8nt_comp_GAP_G_GAP_G_localization_corrected_neighbour_counting_radius2_1200.csv"
-    path2 = "G:/accuracy_table/Comp/8nt_comp_GAP_C_GAP_C_localization_corrected_neighbour_counting_radius2_inf.csv"
-    #path3 = "G:/accuracy_table/Comp/GAP_A_8nt_comp_df10_GAP_A_Localization_corrected_neighbour_counting_radius2_inf.csv"
-    #path4 = "G:/accuracy_table/Comp/GAP_T_8nt_comp_df10_GAP_T_Localization_corrected_neighbour_counting_radius2_1100.csv"
-    #path5 = "G:/time_vs_accuracy/5base/pos6/csv_files/GAP13_5ntseq_pos6seq_GAP13_localization_corrected_neighbour_counting_radius2_1200.csv"
 
-    #path="G:/time_vs_accuracy/nonComp/nonComp_GapG/csv_files/8nt_GAP_G_Ncomp_GAP_G_localization_corrected_neighbour_counting_radius2_1000.csv"
-    base_calling(path2, maximum_length=(1200 * 0.95), exp_type='competitive', display=True,
-                 correct_pick='G', save_results=False, threshold=None)
 
