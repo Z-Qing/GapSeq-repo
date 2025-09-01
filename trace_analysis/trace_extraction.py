@@ -3,9 +3,6 @@ from tifffile import imread
 import pandas as pd
 
 def create_circular_masks(image_shape, yx, inner_radius, gap_width, outer_radius):
-    """
-    adapted from DeepFRET
-    """
     yy, xx = yx
     yi, xi = np.indices(image_shape)
     dist_sq = (yy - yi) ** 2 + (xx - xi) ** 2
@@ -23,12 +20,10 @@ def create_circular_masks(image_shape, yx, inner_radius, gap_width, outer_radius
 
 
 def calculate_intensities(movie_path, hdf5_path, inner_radius=1.5, gap_width=1,
-                          roi=(0, 428, 684, 856), outer_radius=2.5, raw=False):
+                          roi=(0, 428, 684, 856), outer_radius=2.5):
     """
-    adapted from DeepFRET
-    raw:
-        Whether to return raw signal/background get_intensities. Otherwise will
-        return signal-background and background as zeroes.
+    the signal is calculated from the median value in the inner circle minus
+    the median value between the outer circle and (inner circle plus a gap)
     """
     locs = pd.read_hdf(hdf5_path, key='locs')
     locs = locs[locs['frame'] == 0]
@@ -57,19 +52,14 @@ def calculate_intensities(movie_path, hdf5_path, inner_radius=1.5, gap_width=1,
 
         # Calculate intensities
         roi_pixels = image_stack[:, center_mask]
-        roi_sum = np.median(roi_pixels, axis=1)#np.sum(roi_pixels, axis=1)
+        roi_median = np.median(roi_pixels, axis=1)
 
         bg_values = image_stack[:, bg_mask]
         bg_median = np.median(bg_values, axis=1)
-        #n_roi_pixels = np.sum(center_mask)
-        bg_sum = bg_median #* n_roi_pixels
+        bg_sum = bg_median
 
-        if raw:
-            signals[:, i] = roi_sum
-            backgrounds[:, i] = bg_sum
-        else:
-            signals[:, i] = roi_sum - bg_sum
-            backgrounds[:, i] = 0
+        signals[:, i] = roi_median - bg_sum
+        backgrounds[:, i] = 0
 
 
     signal_df = pd.DataFrame(signals,  columns=locs.index) # columns=locs.index
@@ -82,7 +72,7 @@ def calculate_intensities(movie_path, hdf5_path, inner_radius=1.5, gap_width=1,
     signal_df_filtered = signal_df.loc[:, signal_stds >= 1]
 
     # # Save the filtered results
-    save_path = movie_path.replace('.tif', '_DeepFRET_intensity.csv')
+    save_path = movie_path.replace('.tif', '_intensity.csv')
     signal_df_filtered.to_csv(save_path, index=False)
     #
     # # Also filter the background array to match
