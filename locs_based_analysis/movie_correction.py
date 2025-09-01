@@ -1,15 +1,13 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import picasso.render as _render
-from picasso.io import save_locs
 from tifffile import imwrite, imread
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 from pystackreg import StackReg
 from pystackreg.util import to_uint16
 from picasso_utils import one_channel_movie
-from DeepFRET_utils import subtract_background_deepFRET
-
+import os
 try:
     import cupy as cp
 except:
@@ -113,19 +111,18 @@ def contrast_enhance(img, gamma_high=0.2, gamma_low=5.0):
 
     img_gamma = np.zeros_like(img_scaled)
     img_gamma[bright_mask] = 65535 * np.power(img_scaled[bright_mask], gamma_high)
-                                    #(img_scaled[bright_mask] / 255) ** (1 / gamma_high)
     img_gamma[dark_mask] = 65535 * np.power(img_scaled[dark_mask], gamma_low)
-                                #255 * (img_scaled[dark_mask] / 255) ** gamma_low
+
     img_gamma = np.clip(img_gamma, 0, 65535).astype(np.uint16)
 
-    plt.imshow(img_gamma, cmap='gray')
-    plt.grid(None)
-    plt.show()
+    # plt.imshow(img_gamma, cmap='gray')
+    # plt.grid(None)
+    # plt.show()
 
     return img_gamma
 
 
-def align_red_green(movie_path, alignment_source, background_remove, gpu):
+def align_red_green(movie_path, alignment_source, gpu):
     channel_1, channel_2 = prepare_two_channel_movie(movie_path, gpu=gpu, drift_correction=True)
 
     if alignment_source == 'super-resolution':
@@ -143,10 +140,6 @@ def align_red_green(movie_path, alignment_source, background_remove, gpu):
     sr = StackReg(StackReg.RIGID_BODY)
     red_to_green_transform_mat = sr.register(image_1, image_2)
 
-    if background_remove:
-        channel_2.movie = subtract_background_deepFRET(channel_2.movie)
-        channel_1.movie = subtract_background_deepFRET(channel_1.movie)
-
     aligned_channel_2_movie = stackreg_channel_alignment(mov=channel_2.movie,
                                                         transform_matrix=red_to_green_transform_mat)
 
@@ -160,7 +153,7 @@ def align_red_green(movie_path, alignment_source, background_remove, gpu):
 
 
 def two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_mat,
-                           alignment_source, gpu, background_remove=False):
+                           alignment_source, gpu):
 
     green, red = prepare_two_channel_movie(movie_path, gpu=gpu)
     if alignment_source == 'super-resolution':
@@ -172,10 +165,6 @@ def two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_m
     # align green to green_ref
     sr = StackReg(StackReg.RIGID_BODY)
     green_to_green_ref_mat = sr.register(green_ref_image, green_image)
-
-    if background_remove:
-        green.movie = subtract_background_deepFRET(green.movie)
-        red.movie = subtract_background_deepFRET(red.movie)
 
     #align green to green_ref
     green_aligned_movie = stackreg_channel_alignment(mov=green.movie, transform_matrix=green_to_green_ref_mat)
@@ -192,15 +181,13 @@ def two_step_channel_align(movie_path, green_ref_image, red_to_green_transform_m
 
 
 def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True,
-                                 gg_alignment_source='first', rg_alignment_source='first',
-                                 ref_background_remove=False, mov_background_remove=False):
+                                 gg_alignment_source='first', rg_alignment_source='first'):
     ''' This function do locs_based_analysis between different green channels using fiducial markers.
     And the fiducial markers can be detected easily in green channel but not red channel.
     The locs in green and red channels of transcription movie should be co-localized. Thus,
     the transformation matrix between green and red channel are acquired from there. '''
     aligned_ref, red_to_green_transform_mat = align_red_green(ref_movie_path,
                                                               alignment_source=rg_alignment_source,
-                                                              background_remove=ref_background_remove,
                                                               gpu=gpu)
     print(red_to_green_transform_mat)
     imwrite(ref_movie_path.replace('.tif', '_corrected.tif'), aligned_ref)
@@ -219,20 +206,15 @@ def position_correction_fiducial(movie_path_list, ref_movie_path, gpu=True,
     for movie_path in movie_path_list:
         aligned_movie = two_step_channel_align(movie_path, green_ref_image,
                                                red_to_green_transform_mat,
-                                               gg_alignment_source, gpu,
-                                               mov_background_remove)
+                                               gg_alignment_source, gpu)
         imwrite(movie_path.replace('.tif', '_corrected.tif'), aligned_movie)
 
 
     return
 
 
-
-import os
-
 def process_correction(dir_path, localization_key='localization', rg_alignment_source='first',
-                       gg_alignment_source='first', gpu=True,
-                       ref_background_remove=False, mov_background_remove=False):
+                       gg_alignment_source='first', gpu=True):
     files = [x for x in os.listdir(dir_path) if x.endswith('.tif') or x.endswith('.raw')]
     ref_list = [x for x in files if localization_key in x]
 
@@ -257,19 +239,16 @@ def process_correction(dir_path, localization_key='localization', rg_alignment_s
 
     position_correction_fiducial(mov_path, ref_path, gpu=gpu,
                                  gg_alignment_source=gg_alignment_source,
-                                 rg_alignment_source=rg_alignment_source,
-                                 ref_background_remove=ref_background_remove,
-                                 mov_background_remove=mov_background_remove)
+                                 rg_alignment_source=rg_alignment_source)
 
     return
 
 
 if __name__ == "__main__":
-    process_correction("G:/CAP_dwellTime_analysis/20250708_CAP_C_2.5nM_100mMNaCl",
+    process_correction("G:/co-localization analysis",
                        rg_alignment_source='first',
                        gg_alignment_source='first',
-                       localization_key='localization', gpu=True,
-                       ref_background_remove=False, mov_background_remove=False)
+                       localization_key='localization', gpu=True)
 
     # channel_1, channel_2 = prepare_two_channel_movie("G:/Miri_GapSeq/20240802_GapSeq_8mer_Tween/100nM/undrift/"
     #                                                  "GapSeq_8mer_Tween_GapA_100nM8merA643BhQ1_200ms_8gl_6r.tif",
