@@ -16,14 +16,14 @@ For Bayesian inference details about the Gaussian, see:
 A part of code is adapted from https://github.com/gwgundersen/bocd/
 
 ============================================================================"""
-
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.colors import LogNorm
 import numpy as np
 from scipy.stats import norm
 from scipy.special import logsumexp
-#from scipy.interpolate import UnivariateSpline
-from sklearn.cluster import AgglomerativeClustering
+import ruptures as rpt
 import pandas as pd
 
 
@@ -36,24 +36,11 @@ class time_series_bocd():
         self.R = np.zeros((self.T + 1, self.T + 1))
         self.pmean = np.zeros(self.T + 1)
         self.pvar = np.zeros(self.T + 1)
+        self.based_corrected_pmean = np.zeros(self.T + 1)
         self.cps = []
-
-
-    # def _compute_spline(self):
-    #     """Compute spline approximation of data"""
-    #     x = np.arange(self.T)
-    #
-    #     smoothed = np.convolve(self.trace, np.ones(5), 'same')
-    #     spline = UnivariateSpline(x, smoothed, k=3, s=None)
-    #
-    #     return spline(x)
-
 
     def bocd(self):
         hazard = 1 / self.T
-
-        #self.trace = self._compute_spline()
-
         # More robust prior estimation
         varx = np.var(self.trace)
         mean0 = np.median(self.trace)  # Using median for robustness
@@ -97,62 +84,31 @@ class time_series_bocd():
         return
 
 
-    def find_changepoints(self):
-        """Identify changepoints from run length posterior matrix"""
-        T = self.R.shape[0] - 1
-        changepoints = [0]
-        run_lengths = np.argmax(self.R[1:], axis=1)  # Most probable run length at each t
+    def PELT_linear_analysis(self, penalty=50, mini_size=1):
 
-        for t in np.arange(1, T):
-            if run_lengths[t] < run_lengths[t - 1] + 1:
-                changepoints.append(t)
+        data = self.pmean
 
-        changepoints.append(self.T + 1)
-        self.cps = changepoints
+        # PELT change point detection
+        algo = rpt.KernelCPD(kernel='linear', min_size=mini_size).fit(data)
+        bkps = algo.predict(pen=penalty)
+        bkps.insert(0, 0)
 
-        return
+        starts = bkps[:-1]
+        ends = bkps[1:]
+        self.cps = bkps[1:-1]
 
-    def get_stage_parameters(self, n_threshold):
-        starts = self.cps[:-1]
-        ends = self.cps[1:]
-        # Calculate median intensities for each segment
-        intensities = [np.median(self.trace[start: end]) for start, end in zip(starts, ends)]
+        intensities = [np.median(data[start: end]) for start, end in zip(starts, ends)]
 
-        # Combine results into the desired format
         stage_params = np.column_stack([intensities, starts, ends, range(len(starts))])
-
         stage_params = pd.DataFrame(stage_params, columns=['intensity', 'start', 'end', 'stage']
                                     ).astype({'start': int, 'end': int, 'stage': int})
 
-
-        # -------------- classify intensities --------------------
-        if len(stage_params) == 1:
-            stage_params['class'] = 0
-            self.stage_params = stage_params
-        else:
-            std_list = []
-            for i in np.arange(len(stage_params)):
-                segment = self.trace[stage_params['start'][i]:stage_params['end'][i]]
-                if len(segment) > 1:  # Need at least 2 points for std
-                    std_list.append(segment.std())
-
-
-            threshold = n_threshold * np.median(std_list)
-
-            data = stage_params['intensity'].values.reshape(-1, 1)
-            cluster = AgglomerativeClustering(linkage='average',distance_threshold=threshold,
-                    n_clusters=None).fit(data)
-
-            labels = cluster.labels_
-            cluster_means = {lbl: data[labels == lbl].mean() for lbl in np.unique(labels)}
-            sorted_labels = sorted(cluster_means, key=cluster_means.get)
-            label_map = {old: new for new, old in enumerate(sorted_labels)}
-            new_labels = np.array([label_map[lbl] for lbl in labels])
-            stage_params['class'] = np.where(new_labels >= 2, 2, new_labels)
-
-            # ---------------------- update the stage parameters ------------------
-            stage_params = stage_params.sort_values(by='start')
-
+        stage_params['class'] = 0
+        #print(stage_params)
+        if len(starts) > 1:
+            threshold = 2 * np.median(np.sqrt(self.pvar)) + np.percentile(self.pmean, 15)
+            stage_params['class'] = (stage_params['intensity'] > threshold).astype(int)
+            # ------------------- merge consecutive stages in the same class-------------------------
             # merge consecutive stages with belong to the same class
             stage_params['group'] = (
                 (stage_params['class'] != stage_params['class'].shift())
@@ -164,23 +120,22 @@ class time_series_bocd():
                 'start': 'min',
                 'end': 'max',
                 'class': 'first',
+                # 'merge': 'first',
             }).reset_index(drop=True)
 
             # Recalculate the real mean intensity using the original signal
             stage_params['intensity'] = stage_params.apply(
-                lambda row: np.median(self.trace[int(row['start']):int(row['end'])]), axis=1)
+                lambda row: np.median(data[int(row['start']):int(row['end'])]), axis=1)
 
+            # stage_params.sort_values(by='start', inplace=True)
             stage_params.reset_index(drop=True, inplace=True)
-            self.stage_params = stage_params
 
-        # Update changepoints (cps) by removing those between merged stages
-        new_cps = [0]  # Start with the first time point
-        for _, row in stage_params.iterrows():
-            new_cps.append(int(row['end']))
-
-        self.cps = new_cps
+        self.stage_parameter = stage_params
+        print(stage_params)
+        self.based_corrected_pmean = data
 
         return
+
 
 
     def plot_posterior(self, title):
@@ -197,34 +152,24 @@ class time_series_bocd():
 
         # Plot predictions with uncertainty
         ax1.plot(np.arange(0, self.T), self.pmean, 'k-', linewidth=2, label='Predicted mean')
-        _2std = 2 * np.sqrt(self.pvar)
+        #ax1.plot(np.arange(0, self.T), self.based_corrected_pmean, 'k-', linewidth=2, label='Base corrected')
+        _std = np.sqrt(self.pvar)
         ax1.fill_between(np.arange(0, self.T),
-                         self.pmean - _2std,
-                         self.pmean + _2std,
-                         color='gray', alpha=0.2, label='±2 std')
+                         self.pmean - _std,
+                         self.pmean + _std,
+                         color='gray', alpha=0.2, label='± std')
 
-        # Plot the segmentation with different colors for each class
-        if hasattr(self, 'stage_params') and not self.stage_params.empty:
-            # Define a color palette for different classes
-            class_colors = {0: 'green', 1: 'orange', 2: 'red'}
+        # Define a color palette for different classes
+        class_colors = {0: 'green', 1: 'orange'}
 
-            for _, row in self.stage_params.iterrows():
-                start = int(row['start'])
-                end = int(row['end'])
-                class_id = int(row['class'])
+        for _, row in self.stage_parameter.iterrows():
+            start = int(row['start'])
+            end = int(row['end'])
+            class_id = int(row['class'])
 
-                # Plot the segment
-                ax1.axvspan(start, end,
-                            facecolor=class_colors[class_id],
-                            alpha=0.2)
+            # Plot the segment
+            ax1.axvspan(start, end, facecolor=class_colors[class_id], alpha=0.2)
 
-                # Add label only once per class
-                if class_id == 0 and _ == 0:
-                    ax1.plot([], [], color=class_colors[class_id], alpha=0.5)
-                elif class_id == 1 and _ == 0:
-                    ax1.plot([], [], color=class_colors[class_id], alpha=0.5)
-                elif class_id == 2 and _ == 0:
-                    ax1.plot([], [], color=class_colors[class_id], alpha=0.5)
 
         # Plot changepoints
         for cp in self.cps:
@@ -234,20 +179,28 @@ class time_series_bocd():
         ax1.set_title(title)
 
         # Plot the run length posterior
-        ax2.imshow(np.rot90(self.R), aspect='auto', cmap='gray_r',
+        im = ax2.imshow(np.rot90(self.R), aspect='auto', cmap='gray_r',
                    norm=LogNorm(vmin=0.0001, vmax=1))
         ax2.set_xlim([0, self.T])
+
+        current_ticks = ax2.get_yticks()
+        current_labels = [int(tick) for tick in current_ticks]  # Convert to integers if needed
+        # Reverse the labels
+        reversed_labels = current_labels[::-1]
+        # Set fixed ticks and labels to avoid the warning
+        ax2.yaxis.set_major_locator(ticker.FixedLocator(current_ticks))
+        ax2.set_yticklabels(reversed_labels)
+
         ax2.margins(0)
         ax2.set_xlabel('Time')
         ax2.set_ylabel('Run length')
 
-        # Add changepoints to posterior plot
-        for cp in self.cps:
-            ax2.axvline(cp, c='red', ls='--', alpha=0.7, linewidth=1)
+        divider = make_axes_locatable(ax2)
+        cax = divider.append_axes("right", size="2.5%", pad=0.1)  # adjust size/pad
+        cbar = fig.colorbar(im, cax=cax)
+        cbar.set_label('P(run)', labelpad=1)
 
         plt.tight_layout()
-        # save_path = "J:/CAP binding/20250709_CAP_library_1base/" + title + ".png"
-        # plt.savefig(save_path, dpi=600)
         plt.show()
 
 

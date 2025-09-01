@@ -3,25 +3,29 @@ import multiprocessing
 from bocd_utils import time_series_bocd
 import numpy as np
 
+
 def bocd_worker(id, data, display=False):
     trace = time_series_bocd(data)
     trace.bocd()
-    trace.find_changepoints()
-    trace.get_stage_parameters(n_threshold=1.0)
+    trace.PELT_linear_analysis()
 
     if display:
         trace.plot_posterior(id)
 
-    return id, trace.stage_params
-
+    return id, trace.stage_parameter
 
 
 def bocd_analysis(path, display=False):
     all_traces = pd.read_csv(path)
+    # all_traces = pd.read_csv(path, header=[0, 1], skiprows=[1, 3])
+    # all_traces = all_traces.loc[:, (slice(None), 'Acceptor')]
 
     if display:
-        for id in all_traces.columns:
+        ids = list(all_traces.columns)
+        np.random.shuffle(ids)
+        for id in ids:
             one_trace = all_traces[id]
+            one_trace = one_trace.dropna()
             bocd_worker(id, one_trace, display=True)
 
     else:
@@ -59,6 +63,10 @@ def bocd_analysis(path, display=False):
 
     return
 
+
 if __name__ == "__main__":
-    bocd_analysis("J:/CAP binding/20250713_CAP_library_1baseNNN/GapG_traces.csv",
-                  display=False)
+    bocd_analysis("G:/CAP_dwellTime_analysis/manuscript_plot/Examples_GapC_GapG_CAP_binding_traces.csv",
+                  display=True)
+
+
+
