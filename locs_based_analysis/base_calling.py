@@ -5,17 +5,16 @@ import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 
 
-def model_func(t, A, K, C):
-    return A * np.exp(K * t) + C
+def model_func(t, A, K):
+    return A * np.exp(K * t)
 
 def fit_exp_nonlinear(t, y):
-    C_guess = 0  # Since we expect it to approach 0
-    A_guess = y[0] - C_guess  # Initial value
+    A_guess = y[0]
     K_guess = -0.01  # Initial decay rate guess (negative since we expect decay)
 
-    opt_parms, parm_cov = curve_fit(model_func, t, y, maxfev=1000, p0=(A_guess, K_guess, C_guess))
-    A, K, C = opt_parms
-    return A, K, C
+    opt_parms, parm_cov = curve_fit(model_func, t, y, maxfev=1000, p0=(A_guess, K_guess))
+    A, K = opt_parms
+    return A, K
 
 
 def threshold_selection(data, bin_size=10, n_decay_length=3):
@@ -30,9 +29,9 @@ def threshold_selection(data, bin_size=10, n_decay_length=3):
 
     mask = positions >= global_min_x
     # Linear Fit (Note that we have to provide the y-offset ("C") value!!
-    A, K, C = fit_exp_nonlinear(positions[mask], first_deriv[mask])
+    A, K = fit_exp_nonlinear(positions[mask], first_deriv[mask])
 
-    fit_y = model_func(positions[mask], A, K, C)
+    fit_y = model_func(positions[mask], A, K)
 
     fig, ax = plt.subplots(2, 1)
     ax[0].bar(positions, counts, width=bin_size)
@@ -109,12 +108,11 @@ def base_calling(path, maximum_length, exp_type, correct_pick=None, threshold=No
     else:
         raise ValueError
 
-
+    results = param.loc[choice.index].copy()
+    results['calling'] = choice
+    results['confidence'] = confidence
+    results['calling'].replace({'A': 'T', 'C': 'G', 'T': 'A', 'G': 'C'}, inplace=True)
     if save_results:
-        results = param.loc[choice.index].copy()
-        results['calling'] = choice
-        results['confidence'] = confidence
-        results['calling'].replace({'A': 'T', 'C': 'G', 'T': 'A', 'G': 'C'}, inplace=True)
         results.to_csv(path.replace('.csv', '_base_calling_result.csv'), index=True)
 
 
@@ -125,11 +123,11 @@ def base_calling(path, maximum_length, exp_type, correct_pick=None, threshold=No
         accuracy_rate = []
         molecule_number = []
         for t in np.arange(0, 1, 0.1):
-            selected_choice = choice.loc[confidence > t]
+            selected_choice = results.loc[results['confidence'] > t]
             if len(selected_choice) == 0:
                 break
             else:
-                summary = selected_choice.value_counts()
+                summary = selected_choice['calling'].value_counts()
                 if correct_pick in summary.index:
                     rate = summary.loc[correct_pick] / summary.sum()
                     accuracy_rate.append(rate)
@@ -148,7 +146,7 @@ def base_calling(path, maximum_length, exp_type, correct_pick=None, threshold=No
                            'molecule_number': molecule_number})
         print(df)
 
-    return pd.DataFrame({'choice': choice, 'confidence': confidence})
+    return results
 
 
 
@@ -211,9 +209,10 @@ if __name__ == '__main__':
     #
     # param.to_csv(path.replace('.csv', '_filtered.csv'))
 
-    path = ("J:/CAP binding/20250713_CAP_library_1baseNNN/sequencing/localization2_corrected_neighbour_counting_radius2_inf.csv")
-    base_calling(path, maximum_length=(1200 * 0.95), exp_type='competitive', display=True,
-                  correct_pick=None, save_results=True, threshold=None)
+    path = ("E:/Thesis/chapter4_GapSeq/figures/threshold_determination/non-comp_GapG/"
+            "8nt_GAP_G_Ncomp_GAP_G_localization_corrected_neighbour_counting_radius2_1000.csv")
+    base_calling(path, maximum_length=(1200 * 0.95), exp_type='non-competitive', display=True,
+                  correct_pick='G', save_results=True, threshold=None)
 
 
 

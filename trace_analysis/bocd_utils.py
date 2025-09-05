@@ -34,9 +34,8 @@ class time_series_bocd():
 
         self.stage_parameter = None
         self.R = np.zeros((self.T + 1, self.T + 1))
-        self.pmean = np.zeros(self.T + 1)
-        self.pvar = np.zeros(self.T + 1)
-        self.based_corrected_pmean = np.zeros(self.T + 1)
+        self.pmean = np.zeros(self.T)
+        self.pvar = np.zeros(self.T)
         self.cps = []
 
     def bocd(self):
