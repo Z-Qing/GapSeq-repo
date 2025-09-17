@@ -100,12 +100,14 @@ def stackreg_channel_alignment(mov, transform_matrix, num_processes=4):
 
 
 
-def contrast_enhance(img, plow=0.5, phigh=99.7, gamma=0.9):
-    lo, hi = np.percentile(img, [plow, phigh])
+def contrast_enhance(img, gamma_high=0.5, gamms_low=2):
+    lo = img.min()
+    hi = img.max()
     if hi <= lo: hi = lo + 1e-6
-    z = np.clip((img - lo) / (hi - lo), 0, 1)
+    z = (img - lo) / (hi - lo)
     # gamma < 1 brightens highlights
-    z = np.power(z, gamma, where=z > 0, out=z)
+    z = np.power(z, gamma_high, where=z > np.percentile(z, 98),
+                 out=np.power(z, gamms_low))
 
     plt.imshow(z, cmap='gray')
     plt.axis('off')
@@ -240,7 +242,7 @@ def process_correction(dir_path, localization_key='localization', rg_alignment_s
 if __name__ == "__main__":
     process_correction("G:/test",
                        rg_alignment_source='first',
-                       gg_alignment_source='first',
+                       gg_alignment_source='super-resolution',
                        localization_key='localization', gpu=True)
 
     # channel_1, channel_2 = prepare_two_channel_movie("G:/Miri_GapSeq/20240802_GapSeq_8mer_Tween/100nM/undrift/"
