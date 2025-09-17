@@ -57,13 +57,10 @@ def competitive_selection(param, threshold):
 
     sorted = param.to_numpy()
     sorted.sort(axis=1)
-    diff = sorted[:, 1] - sorted[:, 0]
-    diff = np.where(diff==0, 1, diff)
-    # avoid value 0 (in this scenario, the diff is 0
-    # or 1 won't make much difference)
-    diff = np.log(diff)
+    diff = sorted[:, 1] - sorted[:, 0] + 1
 
-    diff = diff / diff.max()
+    diff = diff / np.percentile(diff, 90)
+    diff = np.clip(diff, 0, 1)
 
     return choice, diff
 
@@ -77,11 +74,10 @@ def non_competitive_selection(param, threshold):
 
     sorted = param.to_numpy()
     sorted.sort(axis=1)
-    diff = sorted[:, -1] - sorted[:, -2] # the difference between largest number and second largest
-    diff = np.where(diff == 0, 1, diff)
-    diff = np.log(diff)
+    diff = sorted[:, -1] - sorted[:, -2]  + 1 # avoid negative inf
 
-    diff = diff / diff.max()
+    diff = diff / np.percentile(diff, 90) #diff.max()
+    diff = np.clip(diff, 0, 1)
 
     return choice, diff
 
@@ -90,7 +86,7 @@ def base_calling(path, maximum_length, exp_type, correct_pick=None, threshold=No
                  bin_width=5, display=False, save_results=False):
     param = pd.read_csv(path, index_col=0)
     #remove fiducial markers
-    param = param.loc[~(param.min(axis=1) > maximum_length)]
+    param = param.loc[~(param.max(axis=1) > maximum_length)]
 
     # ----------------- threshold selection ------------------------------
     if type(threshold) == int or type(threshold) == float:
@@ -199,20 +195,11 @@ def time_VS_accuracy(dir_path, correct_pick, minimum_confidence, exp_type,
 
 
 if __name__ == '__main__':
-    # path=("G:/20250428_8ntGAP_G_Noncompstand/8ntGAP_G_Noncompstand_GAP_G_localization_corrected_neighbour_counting_radius2_inf.csv")
-    # param = pd.read_csv(path, index_col=0)
-    #
-    # maximum_length = (1200 * 0.95)
-    # param = param.loc[~(param.min(axis=1) > maximum_length)]
-    #
-    # param = param.loc[param.max(axis=1) >= 361]
-    #
-    # param.to_csv(path.replace('.csv', '_filtered.csv'))
-
-    path = ("E:/Thesis/chapter4_GapSeq/figures/threshold_determination/non-comp_GapG/"
-            "8nt_GAP_G_Ncomp_GAP_G_localization_corrected_neighbour_counting_radius2_1000.csv")
-    base_calling(path, maximum_length=(1200 * 0.95), exp_type='non-competitive', display=True,
+    path = ("Z:/Jagadish_new/GAP-seq_method/3nt base sequencing/20250914_3baseseq_pos6/processed/"
+            "3baseseq_pos6_GAP13_loclaization_picasso_bboxes_neighbour_counting_radius2_inf.csv")
+    base_calling(path, maximum_length=(1200 * 0.9), exp_type='competitive', display=True,
                   correct_pick='G', save_results=True, threshold=None)
+
 
 
 
