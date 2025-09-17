@@ -6,15 +6,40 @@ import re
 import os
 from scipy.spatial import KDTree
 from picasso_utils import one_channel_movie
-from sklearn.cluster import DBSCAN
-from picasso.postprocess import link
 import warnings
-import matplotlib.pyplot as plt
+from sklearn.metrics import mean_squared_error
 
 
-def neighbour_counting(ref_points, mov_points, nuc, search_radius=2):
+def remove_stuck_molecules(data, max_frame, threshold=0.05):
+    ''' this function compare the distribution in the frames of localisations and
+    compare it with a uniform distribution '''
+    data = data.to_numpy()
+
+    k = max_frame + 1
+    N = len(data)
+    cats = np.arange(0, k)
+    counts = np.bincount(data, minlength=len(cats))
+    cdf = np.cumsum(counts) / N
+
+    expected = np.arange(1, k + 1) / k
+    error = mean_squared_error(expected, cdf, squared=False)
+
+    # plt.plot(cats, cdf)
+    # plt.plot(cats, expected)
+    # plt.title(str(error))
+    # plt.show()
+    keep = True
+    if error > threshold:
+        keep = False
+
+    return keep
+
+
+def neighbour_counting(ref_points, mov_points, nuc, frame_number,
+                       search_radius=2):
     # Extract x, y coordinates
     ref_coords = np.column_stack((ref_points['x'], ref_points['y']))
+    mov_points = pd.DataFrame.from_records(mov_points)
     mov_coords = np.column_stack((mov_points['x'], mov_points['y']))
 
     # Build KDTree for fast neighbor lookup
@@ -23,15 +48,26 @@ def neighbour_counting(ref_points, mov_points, nuc, search_radius=2):
     # Query neighbors within the given radius
     indices = tree.query_ball_point(ref_coords, search_radius)
 
-    # Count neighbors for each reference point
-    neighbor_counts = [len(neigh) for neigh in indices]
+    # get the frames for the neighbour localisations
+    neighbour_counts = []
+    keep_list = []
+    for neigh in indices:
+        neighbour_counts.append(len(neigh))
 
+        neigh_frames = mov_points.loc[neigh, 'frame']
+        if len(neigh_frames) > 50:
+            keep_list.append(remove_stuck_molecules(neigh_frames, frame_number))
+        else:
+            keep_list.append(True)
 
-    # Convert to DataFrame
-    params = pd.DataFrame({nuc: neighbor_counts})
-    params.index.name = 'ref_index'
+    counts = pd.DataFrame({nuc: neighbour_counts})
+    counts.index.name = 'ref_index'
 
-    return params
+    keep = pd.DataFrame({nuc: keep_list})
+    keep.index.name = 'ref_index'
+
+    return counts, keep
+
 
 
 
@@ -40,6 +76,9 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
                                    gpu=True, ref_roi=None, ref_gradient=400, roi=None, save_hdf5=False):
     if ref_path.endswith('.hdf5'):
         ref_locs, _ = load_locs(ref_path)
+        ref_locs = pd.DataFrame.from_records(ref_locs)
+        if 'group' in ref_locs.columns:
+            ref_locs = ref_locs.groupby(by='group').mean()
 
     elif ref_path.endswith('.tif'):
         ref = one_channel_movie(ref_path, roi=ref_roi, frame_range=0)
@@ -50,15 +89,19 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
         ref_locs = ref.locs
         save_locs(ref_path.replace('.tif', '.hdf5'), ref_locs, ref.info)
 
+    elif ref_path.endswith('.csv'):
+        ref_locs = pd.read_csv(ref_path)
+
     else:
         raise ValueError('please provide the address of .hdf5 or .tif file')
 
     nuc_locs = {}
     for movie_path in mov_list:
+        f = os.path.basename(movie_path)
         try:
-            nuc = re.search(pattern, os.path.basename(movie_path)).group(1)
+            nuc = re.search(pattern, f).group(1)
         except:
-            warnings.warn('cannot find nucleotide for {}'.format(movie_path))
+            warnings.warn('cannot find nucleotide for {}'.format(f))
             continue
 
         if movie_path.endswith('.hdf5'):
@@ -80,12 +123,19 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
 
     # ----------------------- neighbour counting ----------------------
     total_params = []
+    total_keep = []
     for nuc in nuc_locs.keys():
-        param = neighbour_counting(ref_locs, nuc_locs[nuc], nuc, search_radius=search_radius)
+        frame_number = max(nuc_locs[nuc]['frame'])
+        param, keep = neighbour_counting(ref_locs, nuc_locs[nuc], nuc, frame_number, search_radius=search_radius)
         total_params.append(param)
+        total_keep.append(keep)
 
+    # remove molecules that have stuck seals
     counting_params = pd.concat(total_params, axis=1)
-    #counting_params['10'] = LC.loc[mask, '10']
+    keep_params = pd.concat(total_keep, axis=1)
+    keep_params = np.all(keep_params, axis=1)
+    print(np.sum(keep_params==False))
+    counting_params = counting_params.loc[keep_params.index]
 
     return counting_params
 
@@ -115,7 +165,6 @@ def process_analysis_Localization(dir_path, pattern, ref_path=None, target_forma
                                             roi=[0, 428, 684, 856], ref_roi=[0, 0, 684, 428], max_frame=max_frame,
                                             ref_gradient=400, mov_gradient=gradient, save_hdf5=save_hdf5)
     counts.to_csv(dir_path + '/{}_neighbour_counting_radius{}_{}.csv'.format(ref_keyword, search_radius, max_frame))
-
 
     return
 
@@ -157,13 +206,15 @@ def process_analysis_ALEX(dir_path, ref_path=None, search_radius=2, mov_gradient
 if __name__ == "__main__":
     #process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
 
-    process_analysis_Localization("Z:/Qing_2/GAPSeq/competitive/20250323_8nt_comp_GAP_C/corrected_movies",
-                                  ref_path=None,
+    process_analysis_Localization("Z:/Jagadish_new/GAP-seq_method/3nt base sequencing/20250914_3baseseq_pos6/processed",
+                                  ref_path="Z:/Jagadish_new/GAP-seq_method/3nt base sequencing/20250914_3baseseq_pos6/"
+                                           "processed/3baseseq_pos6_GAP13_loclaization_picasso_bboxes.hdf5",
                                   localization_keyword='localization', # use for find reference molecules or exclude the localization movie
                                   gpu=True,
-                                  pattern= r'_S3([A-Z])-', #r'_([a-zA-Z]+)500nM_',
+                                  pattern= r'_seal6([A-Z])_',
+                                  #r'_S6A_(\d+(?:\.\d+)?(?:nM|uM))_corrected',, #r'_([a-zA-Z]+)500nM_',
                                   #r'_(\d+(?:\.\d+)?(?:nM|uM))_corrected',
                                   max_frame=np.inf,
                                   save_hdf5=True,
-                                  target_format='.tif',
+                                  target_format='.hdf5',
                                   search_radius=2, gradient=1000)
