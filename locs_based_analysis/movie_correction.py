@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+from scipy.ndimage import grey_opening
 import numpy as np
 import picasso.render as _render
 from tifffile import imwrite, imread
@@ -99,27 +100,19 @@ def stackreg_channel_alignment(mov, transform_matrix, num_processes=4):
 
 
 
-def contrast_enhance(img, gamma_high=0.2, gamma_low=5.0):
-    # make fiducial markers more significant
+def contrast_enhance(img, plow=0.5, phigh=99.7, gamma=0.9):
+    lo, hi = np.percentile(img, [plow, phigh])
+    if hi <= lo: hi = lo + 1e-6
+    z = np.clip((img - lo) / (hi - lo), 0, 1)
+    # gamma < 1 brightens highlights
+    z = np.power(z, gamma, where=z > 0, out=z)
 
-    img_scaled = (img - img.min()) / (img.max() - img.min())
+    plt.imshow(z, cmap='gray')
+    plt.axis('off')
+    plt.grid(None)
+    plt.show()
 
-    # Dual gamma correction
-    threshold = np.percentile(img, 98)  # point for gamma split
-    bright_mask = img_scaled > threshold
-    dark_mask = ~bright_mask
-
-    img_gamma = np.zeros_like(img_scaled)
-    img_gamma[bright_mask] = 65535 * np.power(img_scaled[bright_mask], gamma_high)
-    img_gamma[dark_mask] = 65535 * np.power(img_scaled[dark_mask], gamma_low)
-
-    img_gamma = np.clip(img_gamma, 0, 65535).astype(np.uint16)
-
-    # plt.imshow(img_gamma, cmap='gray')
-    # plt.grid(None)
-    # plt.show()
-
-    return img_gamma
+    return z
 
 
 def align_red_green(movie_path, alignment_source, gpu):
@@ -245,7 +238,7 @@ def process_correction(dir_path, localization_key='localization', rg_alignment_s
 
 
 if __name__ == "__main__":
-    process_correction("G:/co-localization analysis",
+    process_correction("G:/test",
                        rg_alignment_source='first',
                        gg_alignment_source='first',
                        localization_key='localization', gpu=True)
