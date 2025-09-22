@@ -7,10 +7,9 @@ from picasso.clusterer import dbscan
 from picasso.postprocess import link
 from picasso.lib import ensure_sanity, n_futures_done
 from scipy.spatial import KDTree
-from scipy.ndimage import uniform_filter, shift
+from scipy.ndimage import shift
 import numpy as np
 from numpy.lib import recfunctions as rfn
-import matplotlib.pyplot as plt
 import time
 
 try:
