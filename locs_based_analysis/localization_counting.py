@@ -1,38 +1,86 @@
 import numpy as np
 import pandas as pd
-from numpy.ma.core import max_filler
 from picasso.io import save_locs, load_locs
 import re
 import os
 from scipy.spatial import KDTree
 from picasso_utils import one_channel_movie
 import warnings
+import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error
 
 
-def remove_stuck_molecules(data, max_frame, threshold=0.05):
-    ''' this function compare the distribution in the frames of localisations and
-    compare it with a uniform distribution '''
-    data = data.to_numpy()
+def is_well_spread_by_bundles(
+    frames: np.ndarray,
+    *,
+    min_bundles: int = 5,
+    max_longest_run_frac: float = 0.5,
+    total_frames_ref: int | None = None,
+    min_run_len_frames: int = 1,
+    min_total_locs: int = 100
+) -> bool:
+    """
+    Return True if the cluster passes (keep), False if it fails (reject).
 
-    k = max_frame + 1
-    N = len(data)
-    cats = np.arange(0, k)
-    counts = np.bincount(data, minlength=len(cats))
-    cdf = np.cumsum(counts) / N
+    frames            : 1D array of frame indices for the cluster's localizations.
+    min_bundles       : require at least this many consecutive-frame bundles.
+    max_longest_run_frac : longest bundle length must be <= this fraction of total_frames_ref.
+    total_frames_ref  : reference number of frames (e.g., total movie frames).
+                        If None, uses the cluster's covered span (max(frames)-min(frames)+1).
+    min_run_len_frames: only count runs of at least this many frames as a bundle.
+    min_total_locs    : if total localizations < this, auto-keep (or tweak as you like).
+    """
+    f = np.asarray(frames, dtype=int)
+    if f.size < min_total_locs:
+        return True
 
-    expected = np.arange(1, k + 1) / k
-    error = mean_squared_error(expected, cdf, squared=False)
+    uf = np.unique(f)
+    if uf.size == 0:
+        return False
+    if uf.size == 1:
+        # Single-frame cluster is a single bundle of length 1
+        longest = 1
+        num_bundles = 1 if 1 >= min_run_len_frames else 0
+    else:
+        # Find consecutive runs over unique frames
+        breaks = np.diff(uf) != 1
+        starts = np.r_[0, np.nonzero(breaks)[0] + 1]
+        ends   = np.r_[starts[1:] - 1, uf.size - 1]
 
-    # plt.plot(cats, cdf)
-    # plt.plot(cats, expected)
-    # plt.title(str(error))
-    # plt.show()
-    keep = True
-    if error > threshold:
-        keep = False
+        run_lens = uf[ends] - uf[starts] + 1  # length in frames
+        # Only count "real" bundles
+        real = run_lens >= min_run_len_frames
+        run_lens = run_lens[real]
+        num_bundles = int(run_lens.size)
+        longest = int(run_lens.max()) if num_bundles > 0 else 0
 
-    return keep
+    # Reference frame count: movie length (recommended) or cluster span
+    if total_frames_ref is None:
+        total_frames_ref = int(uf[-1] - uf[0] + 1)
+
+    # Rule A: enough bundles
+    rule_a = num_bundles >= min_bundles
+    # Rule B: longest bundle small enough
+    rule_b = (longest / max(total_frames_ref, 1)) <= max_longest_run_frac
+
+    return bool(rule_a and rule_b)
+
+
+# def reject_time_bundled_clusters(df, cluster_col="cluster", frame_col="frame", **kwargs):
+#     """
+#     df has one row per localization with at least [cluster_col, frame_col].
+#     Returns a boolean mask aligned with df indicating rows to KEEP (not bundled).
+#     """
+#     # Decide per-cluster
+#     bundled_map = (
+#         df.groupby(cluster_col)[frame_col]
+#           .apply(lambda s: is_temporally_bundled(s.to_numpy(), **kwargs))
+#     )
+#     # Mark rows from bundled clusters to drop
+#     bundled_clusters = set(bundled_map.index[bundled_map.values])
+#     keep_mask = ~df[cluster_col].isin(bundled_clusters)
+#
+#     return keep_mask
 
 
 def neighbour_counting(ref_points, mov_points, nuc, frame_number,
@@ -55,8 +103,16 @@ def neighbour_counting(ref_points, mov_points, nuc, frame_number,
         neighbour_counts.append(len(neigh))
 
         neigh_frames = mov_points.loc[neigh, 'frame']
-        if len(neigh_frames) > 50:
-            keep_list.append(remove_stuck_molecules(neigh_frames, frame_number))
+        if len(neigh_frames) > 0:
+            well_spread= is_well_spread_by_bundles(neigh_frames, total_frames_ref=frame_number)
+            keep_list.append(well_spread)
+
+            # if not well_spread:
+            #     y = np.zeros(frame_number)
+            #     y[neigh_frames] = 1.0
+            #     plt.plot(np.arange(frame_number), y)
+            #     plt.show()
+
         else:
             keep_list.append(True)
 
@@ -125,17 +181,19 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
     total_params = []
     total_keep = []
     for nuc in nuc_locs.keys():
-        frame_number = max(nuc_locs[nuc]['frame'])
+        frame_number = max(nuc_locs[nuc]['frame']) + 1
         param, keep = neighbour_counting(ref_locs, nuc_locs[nuc], nuc, frame_number, search_radius=search_radius)
         total_params.append(param)
         total_keep.append(keep)
 
     # remove molecules that have stuck seals
-    counting_params = pd.concat(total_params, axis=1)
-    keep_params = pd.concat(total_keep, axis=1)
-    keep_params = np.all(keep_params, axis=1)
-    print(np.sum(keep_params==False))
-    counting_params = counting_params.loc[keep_params.index]
+    counting_params = pd.concat(total_params, axis=1)  # counts per nuc
+    keep_params_df = pd.concat(total_keep, axis=1)  # booleans per nuc (aligned by ref_index)
+    keep_mask = keep_params_df.all(axis=1, skipna=False)  # <-- pandas .all keeps the index
+
+    print("Num rows dropped:", (~keep_mask).sum())
+    counting_params = counting_params.loc[keep_mask].copy()
+
 
     return counting_params
 
@@ -143,7 +201,7 @@ def locs_based_analysis_preAligned(ref_path, mov_list, pattern, search_radius=2,
 
 def process_analysis_Localization(dir_path, pattern, ref_path=None, target_format='.tif',
                                   localization_keyword='localization', max_frame=np.inf,
-                                   search_radius=2, gradient=1000, gpu=True, save_hdf5=False):
+                                   search_radius=2.0, gradient=1000, gpu=True, save_hdf5=False):
     files = [x for x in os.listdir(dir_path) if x.endswith(target_format)]
 
     if ref_path is None:
@@ -170,7 +228,7 @@ def process_analysis_Localization(dir_path, pattern, ref_path=None, target_forma
 
 
 
-def process_analysis_ALEX(dir_path, ref_path=None, search_radius=2, mov_gradient=1000, gpu=True,
+def process_analysis_ALEX(dir_path, ref_path=None, search_radius=2.0, mov_gradient=1000, gpu=True,
                           max_frame=np.inf, save_hdf5=False):
     files = os.listdir(dir_path)
     if ref_path is None:
@@ -203,18 +261,18 @@ def process_analysis_ALEX(dir_path, ref_path=None, search_radius=2, mov_gradient
 
 
 
+
 if __name__ == "__main__":
     #process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
 
-    process_analysis_Localization("Z:/Jagadish_new/GAP-seq_method/3nt base sequencing/20250914_3baseseq_pos6/processed",
-                                  ref_path="Z:/Jagadish_new/GAP-seq_method/3nt base sequencing/20250914_3baseseq_pos6/"
-                                           "processed/3baseseq_pos6_GAP13_loclaization_picasso_bboxes.hdf5",
+    process_analysis_Localization("G:/new_accuracy_table/5base/pos8",
+                                  ref_path=None,
                                   localization_keyword='localization', # use for find reference molecules or exclude the localization movie
                                   gpu=True,
-                                  pattern= r'_seal6([A-Z])_',
+                                  pattern= r'_seal5([A-Z])_',
                                   #r'_S6A_(\d+(?:\.\d+)?(?:nM|uM))_corrected',, #r'_([a-zA-Z]+)500nM_',
                                   #r'_(\d+(?:\.\d+)?(?:nM|uM))_corrected',
                                   max_frame=np.inf,
                                   save_hdf5=True,
                                   target_format='.hdf5',
-                                  search_radius=2, gradient=1000)
+                                  search_radius=2.0, gradient=1000)

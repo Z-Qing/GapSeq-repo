@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
-
+import warnings
 
 def model_func(t, A, K):
     return A * np.exp(K * t)
@@ -48,39 +48,59 @@ def threshold_selection(data, bin_size=10, n_decay_length=3):
     return transition_x
 
 
+def non_competitive_selection(param: pd.DataFrame, threshold: float):
+    """
+    Pick the column with the *largest* value per row (non-competitive),
+    and compute a confidence from the gap between the best and runner-up.
+    Rows are first filtered to keep those with at least one entry > threshold.
+    Confidence is robustly scaled using [q10, q90] of the gap distribution.
+    """
+    # 1) Row filter: keep rows with ≥1 entry > threshold
+    mask = (param.to_numpy() > threshold).sum(axis=1) >= 1
+    param_f = param.loc[mask]
+
+    # 2) Choice: max per row
+    choice = param_f.idxmax(axis=1)
+
+    # 3) Confidence: top-two gap (best - runner_up)
+    #    Use partition trick on negative values to get largest elements efficiently.
+    vals = param_f.to_numpy()
+
+    # For maximums, operate on -vals so the "smallest two" of -vals are the two largest of vals
+    neg_vals = -vals
+    part = np.partition(neg_vals, kth=[0, 1], axis=1)
+    best = -part[:, 0]
+    runner_up = -part[:, 1]
+    margin = best - runner_up  # non-negative top-two gap
+
+    # 4) Robust scaling to [0, 1] using q10–q90 of margins
+    q10, q90 = np.percentile(margin, [0, 90])
+    scale = max(q90 - q10, 1e-12)
+    conf_arr = np.clip((margin - q10) / scale, 0, 1)
+
+    conf = pd.Series(conf_arr, index=param_f.index)
+
+    return choice, conf
+
+
 def competitive_selection(param, threshold):
     b = np.sum(param.to_numpy() > threshold, axis=1)
     b = b >= 3
     param = param.loc[b]
-
     choice = param.idxmin(axis=1)
-
     sorted = param.to_numpy()
-    sorted.sort(axis=1)
-    diff = sorted[:, 1] - sorted[:, 0] + 1
+    sorted.sort(axis=1) #diff = sorted[:, 1] - sorted[:, 0] # diff = diff / np.percentile(diff, 95) # conf = np.clip(diff, 0, 1)
+    vals = param.to_numpy()
+    part = np.partition(vals, 1, axis=1)
+    best = part[:, 0]
+    runner_up = part[:, 1]
+    margin = runner_up - best # top-two gap
 
-    diff = diff / np.percentile(diff, 90)
-    diff = np.clip(diff, 0, 1)
+    q5, q95 = np.percentile(margin, [0, 90])
+    scale = max(q95 - q5, 1e-12)
+    conf = np.clip((margin - q5) / scale, 0, 1) # # choice = param.idxmin(axis=1)
 
-    return choice, diff
-
-
-def non_competitive_selection(param, threshold):
-    b = np.sum(param.to_numpy() > threshold, axis=1)
-    b = b >= 1
-    param = param.loc[b]
-
-    choice = param.idxmax(axis=1)
-
-    sorted = param.to_numpy()
-    sorted.sort(axis=1)
-    diff = sorted[:, -1] - sorted[:, -2]  + 1 # avoid negative inf
-
-    diff = diff / np.percentile(diff, 90) #diff.max()
-    diff = np.clip(diff, 0, 1)
-
-    return choice, diff
-
+    return choice, conf
 
 def base_calling(path, maximum_length, exp_type, correct_pick=None, threshold=None,
                  bin_width=5, display=False, save_results=False):
@@ -118,7 +138,7 @@ def base_calling(path, maximum_length, exp_type, correct_pick=None, threshold=No
         thresholds = []
         accuracy_rate = []
         molecule_number = []
-        for t in np.arange(0, 1, 0.1):
+        for t in np.arange(0, 1, 0.05):
             selected_choice = results.loc[results['confidence'] > t]
             if len(selected_choice) == 0:
                 break
@@ -195,10 +215,9 @@ def time_VS_accuracy(dir_path, correct_pick, minimum_confidence, exp_type,
 
 
 if __name__ == '__main__':
-    path = ("Z:/Jagadish_new/GAP-seq_method/3nt base sequencing/20250914_3baseseq_pos6/processed/"
-            "3baseseq_pos6_GAP13_loclaization_picasso_bboxes_neighbour_counting_radius2_inf.csv")
-    base_calling(path, maximum_length=(1200 * 0.9), exp_type='competitive', display=True,
-                  correct_pick='G', save_results=True, threshold=None)
+    path = ("G:/new_accuracy_table/3base/pos6/3baseseq_pos6_GAP13_localization_corrected_neighbour_counting_radius2.0_inf.csv")
+    base_calling(path, maximum_length=(1200 * 1.0), exp_type='competitive', display=True,
+                  correct_pick='G', save_results=False, threshold=None)
 
 
 
