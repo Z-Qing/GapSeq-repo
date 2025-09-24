@@ -7,7 +7,6 @@ from scipy.spatial import KDTree
 from picasso_utils import one_channel_movie
 import warnings
 import matplotlib.pyplot as plt
-from sklearn.metrics import mean_squared_error
 
 
 def is_well_spread_by_bundles(
@@ -64,23 +63,6 @@ def is_well_spread_by_bundles(
     rule_b = (longest / max(total_frames_ref, 1)) <= max_longest_run_frac
 
     return bool(rule_a and rule_b)
-
-
-# def reject_time_bundled_clusters(df, cluster_col="cluster", frame_col="frame", **kwargs):
-#     """
-#     df has one row per localization with at least [cluster_col, frame_col].
-#     Returns a boolean mask aligned with df indicating rows to KEEP (not bundled).
-#     """
-#     # Decide per-cluster
-#     bundled_map = (
-#         df.groupby(cluster_col)[frame_col]
-#           .apply(lambda s: is_temporally_bundled(s.to_numpy(), **kwargs))
-#     )
-#     # Mark rows from bundled clusters to drop
-#     bundled_clusters = set(bundled_map.index[bundled_map.values])
-#     keep_mask = ~df[cluster_col].isin(bundled_clusters)
-#
-#     return keep_mask
 
 
 def neighbour_counting(ref_points, mov_points, nuc, frame_number,

@@ -74,7 +74,7 @@ def non_competitive_selection(param: pd.DataFrame, threshold: float):
     margin = best - runner_up  # non-negative top-two gap
 
     # 4) Robust scaling to [0, 1] using q10–q90 of margins
-    q10, q90 = np.percentile(margin, [0, 90])
+    q10, q90 = np.percentile(margin, [0, 95])
     scale = max(q90 - q10, 1e-12)
     conf_arr = np.clip((margin - q10) / scale, 0, 1)
 
@@ -96,7 +96,7 @@ def competitive_selection(param, threshold):
     runner_up = part[:, 1]
     margin = runner_up - best # top-two gap
 
-    q5, q95 = np.percentile(margin, [0, 90])
+    q5, q95 = np.percentile(margin, [0, 95])
     scale = max(q95 - q5, 1e-12)
     conf = np.clip((margin - q5) / scale, 0, 1) # # choice = param.idxmin(axis=1)
 
