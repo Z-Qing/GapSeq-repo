@@ -215,8 +215,8 @@ def time_VS_accuracy(dir_path, correct_pick, minimum_confidence, exp_type,
 
 
 if __name__ == '__main__':
-    path = ("G:/new_accuracy_table/3base/pos6/3baseseq_pos6_GAP13_localization_corrected_neighbour_counting_radius2.0_inf.csv")
-    base_calling(path, maximum_length=(1200 * 1.0), exp_type='competitive', display=True,
+    path = ("G:/new_accuracy_table/non-comp/GapG/8nt_GAP_G_Ncomp_GAP_G_localization_corrected_neighbour_counting_radius2.0_inf.csv")
+    base_calling(path, maximum_length=(1200 * 1.0), exp_type='non-competitive', display=True,
                   correct_pick='G', save_results=False, threshold=None)
 
 

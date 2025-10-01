@@ -27,7 +27,7 @@ def is_well_spread_by_bundles(
     total_frames_ref  : reference number of frames (e.g., total movie frames).
                         If None, uses the cluster's covered span (max(frames)-min(frames)+1).
     min_run_len_frames: only count runs of at least this many frames as a bundle.
-    min_total_locs    : if total localizations < this, auto-keep (or tweak as you like).
+    min_total_locs    : if total localizations < this, auto-keep.
     """
     f = np.asarray(frames, dtype=int)
     if f.size < min_total_locs:
@@ -247,14 +247,14 @@ def process_analysis_ALEX(dir_path, ref_path=None, search_radius=2.0, mov_gradie
 if __name__ == "__main__":
     #process_analysis_ALEX("G:/20250405_IPE_NTP200_ALEX_exp29", gradient=750, gpu=True)
 
-    process_analysis_Localization("G:/new_accuracy_table/5base/pos8",
+    process_analysis_Localization("J:/competitive/20250325_8nt_comp_GAP_G",
                                   ref_path=None,
                                   localization_keyword='localization', # use for find reference molecules or exclude the localization movie
                                   gpu=True,
-                                  pattern= r'_seal5([A-Z])_',
+                                  pattern= r'_S3([A-Z])_',
                                   #r'_S6A_(\d+(?:\.\d+)?(?:nM|uM))_corrected',, #r'_([a-zA-Z]+)500nM_',
                                   #r'_(\d+(?:\.\d+)?(?:nM|uM))_corrected',
                                   max_frame=np.inf,
                                   save_hdf5=True,
-                                  target_format='.hdf5',
+                                  target_format='.tif',
                                   search_radius=2.0, gradient=1000)

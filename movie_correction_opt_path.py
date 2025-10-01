@@ -2,7 +2,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import picasso.render as _render
 from picasso.clusterer import dbscan
-from skimage_phase_cross_correlation import phase_cross_correlation
+import cv2
+from skimage.registration import phase_cross_correlation
 from tifffile import imwrite, imread
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
@@ -298,5 +299,5 @@ def process_correction(dir_path, localization_key='localization', gpu=True, meth
 
 
 if __name__ == "__main__":
-    process_correction("J:/20250921_5base_pos8",
-                       localization_key='localization', gpu=True, method='real')
+    process_correction("G:/original",
+                       localization_key='localization', gpu=True, method='phase')
